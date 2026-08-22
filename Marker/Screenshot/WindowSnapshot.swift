@@ -53,6 +53,12 @@ enum WindowSnapshot {
                 // rendering bug rather than a capture bug. The window server is the
                 // only thing that sees what is actually on screen.
                 if holds {
+                    // Only the window number. Bounds were added here so a region
+                    // capture could include a popover, and that was a mistake: a
+                    // region shot photographs whatever else happens to be on screen,
+                    // including other people's windows. Evidence stays scoped to one
+                    // window, and anything in a popover is verified by assertion
+                    // instead of by picture.
                     FileHandle.standardOutput.write(
                         Data("windownumber=\(window.windowNumber)\n".utf8)
                     )

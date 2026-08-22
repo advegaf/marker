@@ -9,7 +9,7 @@ import Foundation
 let arguments = Array(CommandLine.arguments.dropFirst())
 let owner = arguments.first ?? ""
 /// Optional second argument: only match windows whose title contains this.
-let titleFilter = arguments.count > 1 ? arguments[1] : nil
+let titleFilter = arguments.dropFirst().first { !$0.hasPrefix("--") }
 guard !owner.isEmpty else {
     FileHandle.standardError.write(Data("usage: window-id.swift <process name>\n".utf8))
     exit(2)
@@ -18,7 +18,7 @@ guard !owner.isEmpty else {
 let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
 let windows = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] ?? []
 
-let matches = windows.compactMap { info -> (Int, CGFloat)? in
+let matches = windows.compactMap { info -> (Int, CGFloat, CGRect)? in
     guard let name = info[kCGWindowOwnerName as String] as? String, name == owner,
           let number = info[kCGWindowNumber as String] as? Int,
           let bounds = info[kCGWindowBounds as String] as? [String: CGFloat],
@@ -29,8 +29,23 @@ let matches = windows.compactMap { info -> (Int, CGFloat)? in
         let title = info[kCGWindowName as String] as? String ?? ""
         guard title.localizedCaseInsensitiveContains(titleFilter) else { return nil }
     }
-    return (number, width * height)
+    let x = bounds["X"] ?? 0
+    let y = bounds["Y"] ?? 0
+    return (number, width * height, CGRect(x: x, y: y, width: width, height: height))
 }.sorted { $0.1 > $1.1 }
 
 guard let best = matches.first else { exit(1) }
-print(best.0)
+// `--bounds` prints x,y,w,h instead, for capturing a region that includes popovers
+// and sheets, which are separate windows a window-scoped capture would miss.
+// `--all` lists every matching window, largest first, so a caller can pick the
+// popover or panel rather than the document window. Still one window per capture:
+// region capture is never used, because it photographs whatever else is on screen.
+if arguments.contains("--all") {
+    for match in matches { print(match.0) }
+    exit(0)
+}
+if arguments.contains("--bounds") {
+    print("\(Int(best.2.minX)),\(Int(best.2.minY)),\(Int(best.2.width)),\(Int(best.2.height))")
+} else {
+    print(best.0)
+}

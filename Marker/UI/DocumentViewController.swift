@@ -22,6 +22,7 @@ final class DocumentViewController: NSViewController {
     private var textView: MarkdownTextView!
 
     private let zoom = ZoomController()
+    private let slashMenu = SlashCommandMenu()
 
     private var theme: MarkerTheme {
         MarkerApp.appearance.theme(for: viewIfLoaded, zoom: zoom.scale)
@@ -68,6 +69,7 @@ final class DocumentViewController: NSViewController {
         view = container
         // The watcher delivers on the main queue, so bridging back to the main actor
         // here is a statement of that fact rather than a hop.
+        slashMenu.onPick = { [weak self] command in self?.insert(command) }
         document.onExternalChange = { [weak self] change in
             MainActor.assumeIsolated { self?.fileChanged(change) }
         }
@@ -79,6 +81,7 @@ final class DocumentViewController: NSViewController {
             editMode = .editing
         }
         applyEditMode()
+        typeFromLaunchEnvironmentIfNeeded()
 
         // Fold a finished pinch into the zoom factor and re-render at real point
         // sizes, rather than leaving the scroll view scaling a rasterised layer.
@@ -226,7 +229,7 @@ final class DocumentViewController: NSViewController {
                 return true
             }
         }
-        return "bytes=\(document.source.byteCount) attrLen=\(textView.textStorage?.length ?? -1) fragments=\(fragments) bottom=\(Int(bottom))"
+        return "bytes=\(document.source.byteCount) attrLen=\(textView.textStorage?.length ?? -1) fragments=\(fragments) bottom=\(Int(bottom)) slashMenu=\(slashMenu.isVisible) slashMatches=\(slashMenu.visibleCount)"
     }
 
     // MARK: Zoom
@@ -300,6 +303,7 @@ final class DocumentViewController: NSViewController {
 
     private func applyEditMode() {
         let editing = editMode == .editing
+        if !editing { slashMenu.hide() }
         textView.isEditable = editing
         // AppKit's undo stack is correct here and only here. In source mode the
         // storage is the source, so its ranges stay valid. The ban on it applies to
@@ -309,6 +313,140 @@ final class DocumentViewController: NSViewController {
         textView.delegate = editing ? self : nil
         render()
         if editing { view.window?.makeFirstResponder(textView) }
+    }
+
+    /// `MARKER_TYPE=/tab` types into the editor at launch, so a QA run can reach the
+    /// command menu without driving the keyboard. It goes through the same path a
+    /// keystroke does rather than setting the string directly, or it would prove
+    /// nothing about the trigger.
+    private func typeFromLaunchEnvironmentIfNeeded() {
+        guard editMode == .editing,
+              let text = ProcessInfo.processInfo.environment["MARKER_TYPE"],
+              isHarnessTarget else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let end = NSRange(location: (self.textView.string as NSString).length, length: 0)
+            self.textView.setSelectedRange(end)
+            self.textView.insertText(text, replacementRange: end)
+
+            // `MARKER_PICK=1` then chooses the highlighted command, through the same
+            // selector Return goes through, so the harness exercises the real path.
+            guard ProcessInfo.processInfo.environment["MARKER_PICK"] != nil else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                _ = self.slashMenu.handle(#selector(NSResponder.insertNewline(_:)))
+                // Reported after a turn of the run loop: closing the popover can
+                // defer the pick, and printing immediately raced it.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                    FileHandle.standardError.write(Data(
+                        "[picked]\n\(self.textView.string)\n[/picked]\n".utf8
+                    ))
+                }
+            }
+        }
+    }
+
+    /// Whether this document is the one the harness asked for.
+    ///
+    /// macOS restores windows from previous sessions, so without this every restored
+    /// document also acts on the launch flags. That produced four insertions in four
+    /// documents and a report about the wrong one, which looked like the feature
+    /// failing when it had actually worked.
+    private var isHarnessTarget: Bool {
+        guard let requested = ProcessInfo.processInfo.environment["MARKER_OPEN"] else { return true }
+        let wanted = URL(fileURLWithPath: (requested as NSString).expandingTildeInPath)
+            .resolvingSymlinksInPath().standardizedFileURL
+        return document.fileURL?.resolvingSymlinksInPath().standardizedFileURL == wanted
+    }
+
+    // MARK: Slash commands
+
+    /// Shows, filters or hides the command menu based on where the caret is.
+    ///
+    /// Driven from the caret rather than from the keystroke, so it behaves the same
+    /// whether the slash was typed, pasted, or arrived by moving the caret back into
+    /// a token that was already there.
+    private func updateSlashMenu() {
+        guard editMode == .editing else { return slashMenu.hide() }
+
+        let caret = textView.selectedRange().location
+        let source = MarkdownSource(textView.string)
+        guard caret <= source.byteCount,
+              let token = SlashCommandInsertion.activeToken(at: renderToSourceOffset(caret), in: source)
+        else { return slashMenu.hide() }
+
+        let matches = SlashCommand.matching(SlashCommandInsertion.query(for: token, in: source))
+        guard !matches.isEmpty else { return slashMenu.hide() }
+
+        if slashMenu.isVisible {
+            slashMenu.update(commands: matches)
+        } else {
+            slashMenu.show(commands: matches, at: caretRect(), in: textView)
+        }
+        if ProcessInfo.processInfo.environment["MARKER_DEBUG_SLASH"] != nil {
+            FileHandle.standardError.write(Data(
+                "[slash] token=\(token) matches=\(matches.count) visible=\(slashMenu.isVisible)\n".utf8
+            ))
+        }
+    }
+
+    /// In source mode the storage is the source, so the two offsets differ only by
+    /// UTF-16 against UTF-8. Converting through the string keeps multibyte text
+    /// honest.
+    private func renderToSourceOffset(_ location: Int) -> Int {
+        let text = textView.string as NSString
+        guard location <= text.length else { return 0 }
+        return text.substring(to: location).utf8.count
+    }
+
+    private func sourceToRenderOffset(_ byteOffset: Int) -> Int {
+        let bytes = Array(textView.string.utf8)
+        let clamped = max(0, min(byteOffset, bytes.count))
+        let prefix = String(bytes: bytes[0 ..< clamped], encoding: .utf8) ?? ""
+        return (prefix as NSString).length
+    }
+
+    private func caretRect() -> NSRect {
+        let range = textView.selectedRange()
+        guard let layoutManager = textView.textLayoutManager,
+              let contentManager = layoutManager.textContentManager,
+              let start = contentManager.location(
+                  contentManager.documentRange.location, offsetBy: range.location
+              ),
+              let fragment = layoutManager.textLayoutFragment(for: start)
+        else { return NSRect(x: 0, y: 0, width: 1, height: 1) }
+
+        var frame = fragment.layoutFragmentFrame
+        frame.origin.x += textView.textContainerOrigin.x
+        frame.origin.y += textView.textContainerOrigin.y
+        // A one-line-tall sliver, so the popover sits under the caret's line rather
+        // than under the whole paragraph.
+        return NSRect(x: frame.minX, y: frame.minY, width: frame.width, height: frame.height)
+    }
+
+    private func insert(_ command: SlashCommand) {
+        let source = MarkdownSource(textView.string)
+        let caret = renderToSourceOffset(textView.selectedRange().location)
+        let debug = ProcessInfo.processInfo.environment["MARKER_DEBUG_SLASH"] != nil
+        guard let token = SlashCommandInsertion.activeToken(at: caret, in: source) else {
+            if debug { FileHandle.standardError.write(Data("[insert] no token at \(caret)\n".utf8)) }
+            return
+        }
+
+        let result = SlashCommandInsertion.apply(command, replacing: token, in: source)
+        let replaceRange = NSRange(
+            location: sourceToRenderOffset(token.lowerBound),
+            length: sourceToRenderOffset(token.upperBound) - sourceToRenderOffset(token.lowerBound)
+        )
+        // Through shouldChangeText so the undo stack records it as one action: a
+        // slash command should undo in a single press, not character by character.
+        guard textView.shouldChangeText(in: replaceRange, replacementString: result.edit.replacement) else {
+            if debug { FileHandle.standardError.write(Data("[insert] refused \(replaceRange)\n".utf8)) }
+            return
+        }
+        if debug { FileHandle.standardError.write(Data("[insert] \(command.name) into \(replaceRange)\n".utf8)) }
+        textView.textStorage?.replaceCharacters(in: replaceRange, with: result.edit.replacement)
+        textView.didChangeText()
+        textView.setSelectedRange(NSRange(location: sourceToRenderOffset(result.caret), length: 0))
     }
 
     // MARK: Find
@@ -349,6 +487,19 @@ extension DocumentViewController: NSTextViewDelegate {
     func textDidChange(_ notification: Notification) {
         guard editMode == .editing else { return }
         document.replaceSource(with: textView.string)
+        updateSlashMenu()
+    }
+
+    func textViewDidChangeSelection(_ notification: Notification) {
+        // Moving the caret out of a token closes the menu, and moving it back in
+        // reopens it, which is what makes the trigger feel like part of the editor
+        // rather than a keystroke handler.
+        updateSlashMenu()
+    }
+
+    /// Arrow keys, Return and Escape belong to the menu while it is open.
+    func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        slashMenu.handle(selector)
     }
 }
 

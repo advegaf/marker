@@ -42,6 +42,8 @@ final class DocumentWindowController: NSWindowController {
         viewController.onEditModeChange = { [weak self] in self?.toolbar.syncEditItem() }
         // A harness run must not have its evidence polluted by windows macOS restored
         // from a previous session, and must not leave its own behind for the next run.
+        // Never persist a harness run's windows, or the next ordinary launch
+        // reopens them.
         if WindowSnapshot.isRequested { window.isRestorable = false }
         // Do not set `document` here. NSDocument.addWindowController does it, and
         // assigning it first leaves the controller unregistered, so the document
