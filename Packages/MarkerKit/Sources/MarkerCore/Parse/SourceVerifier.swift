@@ -16,8 +16,13 @@ public enum SourceVerifier {
     /// code to spaces. In both cases the range is right and only the presentation
     /// differs, which is what rendering means.
     public static func produces(_ literal: String, at range: Range<Int>, in source: MarkdownSource) -> Bool {
+        // The common case, and the hot one: the bytes are already what cmark
+        // reported. Comparing them directly avoids building a String for every
+        // inline run in the document, which is most of the cost of lowering a large
+        // file.
+        if let bytes = source.byteSlice(range), bytes.elementsEqual(literal.utf8) { return true }
+
         guard let raw = source.slice(range) else { return false }
-        if raw == literal { return true }
         let folded = raw
             .replacingOccurrences(of: "\r\n", with: " ")
             .replacingOccurrences(of: "\n", with: " ")

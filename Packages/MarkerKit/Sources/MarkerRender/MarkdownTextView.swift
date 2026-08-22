@@ -159,6 +159,57 @@ public final class MarkdownTextView: NSTextView {
         }
     }
 
+    /// Set while `setContent` is replacing the whole document, so the sizing and
+    /// scrolling hooks below do not fire once per intermediate state.
+    private var isSettingContent = false
+
+    /// Typing has to grow the frame, and the caret has to stay in view.
+    ///
+    /// Both of these come free with `isVerticallyResizable`, and both were lost when
+    /// this view took ownership of its own frame to stop AppKit and TextKit 2
+    /// fighting over it. Owning the frame means owning everything that used to
+    /// follow from it: without the first, the document stops growing as you type and
+    /// the new lines are unreachable; without the second, pressing Down moves the
+    /// caret somewhere you cannot see.
+    public override func didChangeText() {
+        super.didChangeText()
+        guard !isSettingContent, let theme = currentTheme else { return }
+        sizeToFitContent(theme: theme, availableWidth: frame.width)
+        scrollToCaret()
+    }
+
+    public override func setSelectedRanges(
+        _ ranges: [NSValue],
+        affinity: NSSelectionAffinity,
+        stillSelecting: Bool
+    ) {
+        super.setSelectedRanges(ranges, affinity: affinity, stillSelecting: stillSelecting)
+        // Not while dragging a selection: the view should follow the pointer, and
+        // scrolling underneath it fights the drag.
+        guard !isSettingContent, !stillSelecting else { return }
+        scrollToCaret()
+    }
+
+    /// Scrolls the insertion point into view, with a little room around it so the
+    /// caret never sits flush against the top or bottom edge.
+    private func scrollToCaret() {
+        guard let scrollView = enclosingScrollView else { return }
+        let caret = selectedRange()
+        guard caret.location <= (string as NSString).length else { return }
+
+        var rect = firstRect(forCharacterRange: caret, actualRange: nil)
+        guard rect.height > 0 else { return }
+        rect = convert(rect, from: nil)
+
+        let margin = (currentTheme?.bodyPointSize ?? 14) * 2
+        let visible = scrollView.documentVisibleRect
+        if rect.minY - margin < visible.minY {
+            scroll(NSPoint(x: 0, y: max(rect.minY - margin, 0)))
+        } else if rect.maxY + margin > visible.maxY {
+            scroll(NSPoint(x: 0, y: rect.maxY + margin - visible.height))
+        }
+    }
+
     /// True while an input method is composing. The source mirror records the
     /// range but performs no source edit until composition ends, because
     /// mirroring provisional text kills the input session.
@@ -171,6 +222,9 @@ public final class MarkdownTextView: NSTextView {
     /// happen together and in this order, and when two of the three hosts skipped
     /// the last one, both of them scrolled short of the end of the document.
     public func setContent(_ attributed: NSAttributedString, theme: MarkerTheme, availableWidth: CGFloat) {
+        isSettingContent = true
+        defer { isSettingContent = false }
+
         currentTheme = theme
         applyBackground(theme)
         applyMeasure(theme: theme, availableWidth: availableWidth)

@@ -11,9 +11,13 @@ public struct LineIndex: Sendable {
     private let byteCount: Int
 
     public init(_ source: String) {
+        self.init(bytes: Array(source.utf8))
+    }
+
+    public init(bytes: [UInt8]) {
         var starts = [0]
         var offset = 0
-        for byte in source.utf8 {
+        for byte in bytes {
             offset += 1
             // Treat LF as the line break. A CRLF file leaves the CR at the end of
             // the previous line, which is what cmark does too, so columns still line up.
