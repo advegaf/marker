@@ -36,6 +36,7 @@ final class DocumentWindowController: NSWindowController {
 
         super.init(window: window)
         viewController.applyAppearance()
+        document.startWatching()
         toolbar = DocumentToolbar(controller: viewController)
         window.toolbar = toolbar.makeToolbar()
         viewController.onEditModeChange = { [weak self] in self?.toolbar.syncEditItem() }

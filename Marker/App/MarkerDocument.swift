@@ -29,6 +29,13 @@ nonisolated final class MarkerDocument: NSDocument {
 
     private(set) var presentation: Presentation = .markdown
 
+    /// Raised when the file changes underneath us. The document owns the watcher
+    /// because the file belongs to the document, not to whichever window happens to
+    /// be showing it.
+    var onExternalChange: (@Sendable (FileWatcher.Change) -> Void)?
+
+    private var watcher: FileWatcher?
+
     override class var autosavesInPlace: Bool { false }
 
     /// Replaces the source after an edit. The raw string stays the source of truth,
@@ -45,6 +52,37 @@ nonisolated final class MarkerDocument: NSDocument {
         MainActor.assumeIsolated {
             addWindowController(DocumentWindowController(document: self))
         }
+    }
+
+    /// Re-reads from disk, for the reload path. Separate from `read(from:ofType:)`
+    /// because that one is called during open and must not touch the watcher.
+    func reloadFromDisk() throws {
+        guard let url = fileURL else { return }
+        let data = try Data(contentsOf: url)
+        guard let text = Self.decode(data) else {
+            throw NSError(domain: NSCocoaErrorDomain, code: NSFileReadInapplicableStringEncodingError)
+        }
+        source = MarkdownSource(text)
+        updateChangeCount(.changeCleared)
+    }
+
+    func startWatching() {
+        guard let url = fileURL else { return }
+        watcher = FileWatcher(url: url) { [weak self] change in
+            guard let self else { return }
+            // Most editors save by writing a temporary file and renaming it over the
+            // original, which kills the descriptor. Re-arm before reporting, or the
+            // second external save is never seen.
+            if change == .vanished { self.watcher?.rearm() }
+            self.onExternalChange?(change)
+        }
+    }
+
+    override func write(to url: URL, ofType typeName: String) throws {
+        // Our own write must not come back as an external change and ask the user
+        // about their own edit.
+        watcher?.suppress()
+        try super.write(to: url, ofType: typeName)
     }
 
     override func read(from data: Data, ofType typeName: String) throws {

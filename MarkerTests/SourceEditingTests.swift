@@ -68,6 +68,45 @@ nonisolated final class SourceEditingTests: XCTestCase {
         XCTAssertTrue(document.isDocumentEdited)
     }
 
+    // MARK: External change
+
+    func testReloadingPicksUpAnExternalChangeAndClearsTheDirtyFlag() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("marker-reload-\(UUID().uuidString).md")
+        try "# Before\n".write(to: url, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let document = MarkerDocument()
+        try document.read(from: Data(contentsOf: url), ofType: "net.daringfireball.markdown")
+        document.fileURL = url
+
+        // Local edits, then someone else rewrites the file.
+        document.replaceSource(with: "# Before\n\nlocal edit\n")
+        XCTAssertTrue(document.isDocumentEdited)
+
+        try "# After\n\nexternal\n".write(to: url, atomically: true, encoding: .utf8)
+        try document.reloadFromDisk()
+
+        XCTAssertEqual(document.source.text, "# After\n\nexternal\n")
+        XCTAssertFalse(document.isDocumentEdited, "a reload should leave the document clean")
+    }
+
+    func testReloadingAMissingFileThrowsRatherThanEmptyingTheDocument() throws {
+        // Losing someone's open document because the file moved would be the worst
+        // possible response to a rename.
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("marker-gone-\(UUID().uuidString).md")
+        try "# Here\n".write(to: url, atomically: true, encoding: .utf8)
+
+        let document = MarkerDocument()
+        try document.read(from: Data(contentsOf: url), ofType: "net.daringfireball.markdown")
+        document.fileURL = url
+        try FileManager.default.removeItem(at: url)
+
+        XCTAssertThrowsError(try document.reloadFromDisk())
+        XCTAssertEqual(document.source.text, "# Here\n", "the in-memory document must survive")
+    }
+
     func testMultibyteEditsSurviveTheRoundTrip() throws {
         let original = "# 日本語\n\nnaïve café 👋\n"
         let document = try document(original)

@@ -16,6 +16,8 @@ final class DocumentViewController: NSViewController {
     var onEditModeChange: (() -> Void)?
 
     private unowned let document: MarkerDocument
+    private var container: NSView!
+    private var banner: ReloadBanner!
     private var scrollView: NSScrollView!
     private var textView: MarkdownTextView!
 
@@ -53,7 +55,22 @@ final class DocumentViewController: NSViewController {
         scrollView.minMagnification = 0.5
         scrollView.maxMagnification = 3.0
 
-        view = scrollView
+        container = NSView(frame: NSRect(x: 0, y: 0, width: 900, height: 700))
+        scrollView.frame = container.bounds
+        scrollView.autoresizingMask = [.width, .height]
+        container.addSubview(scrollView)
+
+        banner = ReloadBanner(frame: NSRect(x: 0, y: 0, width: 900, height: ReloadBanner.height))
+        banner.autoresizingMask = [.width]
+        banner.isHidden = true
+        container.addSubview(banner)
+
+        view = container
+        // The watcher delivers on the main queue, so bridging back to the main actor
+        // here is a statement of that fact rather than a hop.
+        document.onExternalChange = { [weak self] change in
+            MainActor.assumeIsolated { self?.fileChanged(change) }
+        }
         applyAppearance()
         // The harness needs to be able to open straight into edit mode, since the
         // EDT and TB rows are about what the window looks like in that state.
@@ -87,6 +104,86 @@ final class DocumentViewController: NSViewController {
             WindowMaterial.apply(theme, to: contentView)
         }
         render()
+    }
+
+    // MARK: External change
+
+    private func layoutBanner() {
+        guard let container, let banner, let scrollView else { return }
+        let height = banner.isHidden ? 0 : ReloadBanner.height
+        banner.frame = NSRect(
+            x: 0, y: container.bounds.height - ReloadBanner.height,
+            width: container.bounds.width, height: ReloadBanner.height
+        )
+        scrollView.frame = NSRect(
+            x: 0, y: 0, width: container.bounds.width, height: container.bounds.height - height
+        )
+    }
+
+    private func fileChanged(_ change: FileWatcher.Change) {
+        let theme = self.theme
+
+        switch change {
+        case .vanished:
+            banner.show(
+                message: "\(document.displayName ?? "This file") was moved or deleted.",
+                primaryTitle: "Save Again",
+                secondaryTitle: "Ignore",
+                theme: theme,
+                onPrimary: { [weak self] in self?.document.save(nil) },
+                onSecondary: { [weak self] in self?.layoutBanner() }
+            )
+
+        case .modified:
+            // A document with no unsaved edits has nothing to lose, so reloading
+            // silently is what someone regenerating a file from a build expects.
+            // Asking every time would make the app unusable next to a generator.
+            guard document.isDocumentEdited else {
+                reloadPreservingPosition()
+                return
+            }
+            banner.show(
+                message: "This file changed on disk. You have unsaved changes.",
+                primaryTitle: "Reload",
+                secondaryTitle: "Keep Mine",
+                theme: theme,
+                onPrimary: { [weak self] in self?.reloadPreservingPosition() },
+                onSecondary: { [weak self] in self?.layoutBanner() }
+            )
+        }
+        layoutBanner()
+    }
+
+    /// Reloads and keeps the reader where they were.
+    ///
+    /// Anchored on the fraction of the document scrolled past rather than on a pixel
+    /// offset, because the file just changed length and a pixel offset would land
+    /// somewhere arbitrary.
+    private func reloadPreservingPosition() {
+        let previousHeight = max(textView.frame.height, 1)
+        let previousOffset = scrollView.contentView.bounds.origin.y
+        let fraction = previousOffset / previousHeight
+
+        do {
+            try document.reloadFromDisk()
+        } catch {
+            banner.show(
+                message: "Could not re-read this file.",
+                primaryTitle: "Try Again",
+                secondaryTitle: "Ignore",
+                theme: theme,
+                onPrimary: { [weak self] in self?.reloadPreservingPosition() },
+                onSecondary: { [weak self] in self?.layoutBanner() }
+            )
+            layoutBanner()
+            return
+        }
+
+        render()
+        let restored = fraction * textView.frame.height
+        scrollView.contentView.scroll(to: NSPoint(x: 0, y: restored))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+        layoutBanner()
     }
 
     /// Called once the view is in a window, when the material can be installed.
@@ -227,6 +324,7 @@ final class DocumentViewController: NSViewController {
     /// Guarded on the width actually changing, since layout runs constantly.
     override func viewDidLayout() {
         super.viewDidLayout()
+        layoutBanner()
         let width = max(scrollView.contentSize.width, 320)
         if abs(width - textView.measuredWidth) > 0.5 {
             // Real width change: the measure has to be recomputed and recentred.
