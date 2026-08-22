@@ -79,11 +79,11 @@ public struct AttributedBuilder {
         case .codeFence(let language, let code):
             piece = codeBlock(code, language: language, block: block)
         case .mermaid(let source):
-            piece = placeholder("Mermaid diagram", body: source, block: block)
+            piece = mermaid(source, block: block)
         case .displayMath(let latex):
             piece = displayMath(latex, block: block)
         case .table(let model):
-            piece = placeholder("Table", body: TableMarkdownWriter.markdown(for: model), block: block)
+            piece = table(model, block: block)
         case .thematicBreak:
             piece = thematicBreak(block)
         case .html(let raw):
@@ -118,6 +118,107 @@ public struct AttributedBuilder {
             [.font: theme.monoFont(scale: 0.75), .foregroundColor: theme.colors.link],
             range: NSRange(location: 0, length: label.count)
         )
+        return text
+    }
+
+    /// A Mermaid diagram, rendered natively.
+    ///
+    /// A diagram that will not parse falls back to its own source in a code panel
+    /// with the failing line named. An empty box tells a reader nothing; the source
+    /// plus a reason tells them what to fix, and keeps the promise that no fence
+    /// ever silently disappears.
+    private func mermaid(_ source: String, block: BlockNode) -> NSMutableAttributedString {
+        do {
+            let diagram = try MermaidParser.parse(source)
+            let style = MermaidStyle(fontSize: theme.bodyPointSize)
+            let measure = MermaidRenderer.measure(fontSize: theme.bodyPointSize)
+            let scene: MermaidScene
+            switch diagram {
+            case .flowchart(let chart):
+                scene = FlowchartLayout.scene(for: chart, style: style, measure: measure)
+            case .sequence(let sequence):
+                scene = SequenceLayout.scene(for: sequence, style: style, measure: measure)
+            }
+            guard let image = MermaidRenderer.image(for: scene, theme: theme) else {
+                return mermaidFallback(source, reason: nil, block: block)
+            }
+
+            let attachment = NSTextAttachment()
+            attachment.image = image
+            // A left-to-right chart of any length is wider than the reading measure.
+            // Scaling it down keeps the whole diagram visible, where clipping would
+            // silently hide the end of it and look like a rendering bug.
+            let available = theme.metrics.contentWidth * theme.zoom
+            let scale = image.size.width > available ? available / image.size.width : 1
+            attachment.bounds = CGRect(
+                origin: .zero,
+                size: CGSize(width: image.size.width * scale, height: image.size.height * scale)
+            )
+
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.alignment = .center
+            paragraph.paragraphSpacing = theme.metrics.blockSpacing * 1.4 * theme.zoom
+            paragraph.paragraphSpacingBefore = theme.metrics.blockSpacing * 0.4 * theme.zoom
+
+            let text = NSMutableAttributedString(attachment: attachment)
+            text.addAttribute(.paragraphStyle, value: paragraph,
+                              range: NSRange(location: 0, length: text.length))
+            return text
+        } catch let error as MermaidParseError {
+            return mermaidFallback(source, reason: error, block: block)
+        } catch {
+            return mermaidFallback(source, reason: nil, block: block)
+        }
+    }
+
+    private func mermaidFallback(
+        _ source: String, reason: MermaidParseError?, block: BlockNode
+    ) -> NSMutableAttributedString {
+        let piece = codeBlock(source, language: nil, block: block)
+        guard let reason else { return piece }
+
+        // The note wraps; the source under it does not. A diagnostic that runs off
+        // the edge of the page cannot be read, which defeats the point of printing it.
+        let wrapping = NSMutableParagraphStyle()
+        wrapping.setParagraphStyle(blockParagraphStyle(block, indent: theme.bodyPointSize))
+        wrapping.lineBreakMode = .byWordWrapping
+        wrapping.paragraphSpacing = 0
+
+        let note = NSMutableAttributedString(
+            string: "Mermaid line \(reason.line): \(reason.message)\n",
+            attributes: [
+                .font: theme.monoFont(scale: 0.78),
+                .foregroundColor: theme.colors.link,
+                .paragraphStyle: wrapping,
+                .markerDecoration: MarkerDecoration.codeBlock,
+            ]
+        )
+        note.append(piece)
+        return note
+    }
+
+    /// A table as an attachment.
+    ///
+    /// Wide tables are the reason this is an image rather than flowed text: the
+    /// layout shrinks columns to the measure and wraps inside them, so a ten column
+    /// table stays inside the page instead of forcing the whole document wide.
+    private func table(_ model: TableModel, block: BlockNode) -> NSMutableAttributedString {
+        let available = theme.metrics.contentWidth * theme.zoom
+        guard let image = TableLayout(model: model, theme: theme, maxWidth: available).image() else {
+            return codeBlock(TableMarkdownWriter.markdown(for: model), language: nil, block: block)
+        }
+
+        let attachment = NSTextAttachment()
+        attachment.image = image
+        attachment.bounds = CGRect(origin: .zero, size: image.size)
+
+        let style = NSMutableParagraphStyle()
+        style.paragraphSpacing = theme.metrics.blockSpacing * 1.4 * theme.zoom
+        style.paragraphSpacingBefore = theme.metrics.blockSpacing * 0.4 * theme.zoom
+
+        let text = NSMutableAttributedString(attachment: attachment)
+        text.addAttribute(.paragraphStyle, value: style,
+                          range: NSRange(location: 0, length: text.length))
         return text
     }
 
