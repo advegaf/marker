@@ -81,7 +81,7 @@ public struct AttributedBuilder {
         case .mermaid(let source):
             piece = placeholder("Mermaid diagram", body: source, block: block)
         case .displayMath(let latex):
-            piece = placeholder("Display math", body: latex, block: block)
+            piece = displayMath(latex, block: block)
         case .table(let model):
             piece = placeholder("Table", body: TableMarkdownWriter.markdown(for: model), block: block)
         case .thematicBreak:
@@ -119,6 +119,52 @@ public struct AttributedBuilder {
             range: NSRange(location: 0, length: label.count)
         )
         return text
+    }
+
+    /// A centred formula on its own line, or the source in a code panel when the
+    /// LaTeX does not parse. Showing the source beats showing a blank space to
+    /// someone who is trying to fix a formula.
+    private func displayMath(_ latex: String, block: BlockNode) -> NSMutableAttributedString {
+        guard let rendered = MathRenderer.render(
+            latex: latex,
+            pointSize: theme.bodyPointSize * 1.25,
+            color: theme.colors.text,
+            display: true
+        ) else {
+            return codeBlock(latex, language: "latex", block: block)
+        }
+
+        let attachment = NSTextAttachment()
+        attachment.image = rendered.image
+        attachment.bounds = CGRect(origin: .zero, size: rendered.image.size)
+
+        let style = NSMutableParagraphStyle()
+        style.alignment = .center
+        style.paragraphSpacing = theme.metrics.blockSpacing * 1.4 * theme.zoom
+        style.paragraphSpacingBefore = theme.metrics.blockSpacing * 0.6 * theme.zoom
+
+        let text = NSMutableAttributedString(attachment: attachment)
+        text.addAttribute(.paragraphStyle, value: style,
+                          range: NSRange(location: 0, length: text.length))
+        return text
+    }
+
+    /// A formula inside a sentence, sitting on the text baseline.
+    private func inlineMath(_ latex: String, font: NSFont, color: NSColor) -> NSAttributedString? {
+        // Latin Modern Math has a smaller optical size than the system text face, so
+        // asking for the same point size renders a formula that looks shrunken next
+        // to the words around it. The multiplier matches x-heights by eye.
+        guard let rendered = MathRenderer.render(
+            latex: latex, pointSize: font.pointSize * 1.22, color: color, display: false
+        ) else { return nil }
+
+        let attachment = NSTextAttachment()
+        attachment.image = rendered.image
+        attachment.bounds = CGRect(
+            x: 0, y: -rendered.descent,
+            width: rendered.image.size.width, height: rendered.image.size.height
+        )
+        return NSAttributedString(attachment: attachment)
     }
 
     private func codeBlock(_ code: String, language: String?, block: BlockNode) -> NSMutableAttributedString {
@@ -178,6 +224,27 @@ public struct AttributedBuilder {
         }
 
         for run in block.runs {
+            if run.style.contains(.math) {
+                if let formula = inlineMath(run.text, font: font, color: color) {
+                    let piece = NSMutableAttributedString(attributedString: formula)
+                    piece.addAttributes(
+                        [.paragraphStyle: style, .markerRun: run.id.value],
+                        range: NSRange(location: 0, length: piece.length)
+                    )
+                    output.append(piece)
+                    continue
+                }
+                // Unparseable inline LaTeX falls back to its own source, set as code
+                // so it is visibly not prose.
+                output.append(NSAttributedString(string: "$\(run.text)$", attributes: [
+                    .font: theme.monoFont(scale: font.pointSize / theme.bodyPointSize * 0.92),
+                    .foregroundColor: theme.colors.secondaryText,
+                    .paragraphStyle: style,
+                    .markerRun: run.id.value,
+                ]))
+                continue
+            }
+
             var attributes: [NSAttributedString.Key: Any] = [
                 .font: self.font(for: run.style, base: font),
                 .foregroundColor: run.linkURL != nil ? theme.colors.link : color,

@@ -235,11 +235,55 @@ struct ASTLowering: MarkupWalker {
             recoveredRunCount += 1
         }
 
+        // Inline math is split out of plain text only. Splitting inside inline code
+        // would turn `$PATH` in a shell snippet into a formula.
+        if !style.contains(.code), let raw = source.slice(range), raw.contains("$") {
+            let segments = InlineMathSplitter.split(raw)
+            if segments.contains(where: \.isMath) {
+                for segment in segments {
+                    let start = range.lowerBound + segment.byteOffset
+                    appendSegment(
+                        segment,
+                        sourceRange: start ..< (start + segment.byteLength),
+                        style: style,
+                        linkURL: linkURL,
+                        confidence: confidence,
+                        into: &runs
+                    )
+                }
+                return
+            }
+        }
+
         runs.append(InlineRun(
             id: RunID(nextRunID),
             sourceRange: range,
             text: literal,
             style: style,
+            linkURL: linkURL,
+            confidence: confidence
+        ))
+        nextRunID += 1
+    }
+
+    private mutating func appendSegment(
+        _ segment: InlineMathSplitter.Segment,
+        sourceRange: Range<Int>,
+        style: InlineStyle,
+        linkURL: String?,
+        confidence: MapConfidence,
+        into runs: inout [InlineRun]
+    ) {
+        // Non-math text came off the raw source, so it still carries backslash
+        // escapes that cmark would have resolved. Resolve them the same way, or an
+        // escaped asterisk would render as a backslash.
+        let text = segment.isMath ? segment.text : SourceVerifier.unescaped(segment.text)
+        guard !text.isEmpty else { return }
+        runs.append(InlineRun(
+            id: RunID(nextRunID),
+            sourceRange: sourceRange,
+            text: text,
+            style: segment.isMath ? style.union(.math) : style,
             linkURL: linkURL,
             confidence: confidence
         ))

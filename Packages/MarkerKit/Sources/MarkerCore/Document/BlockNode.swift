@@ -32,6 +32,8 @@ public struct InlineStyle: OptionSet, Sendable, Hashable {
     public static let strong        = InlineStyle(rawValue: 1 << 1)
     public static let strikethrough = InlineStyle(rawValue: 1 << 2)
     public static let code          = InlineStyle(rawValue: 1 << 3)
+    /// The run's text is LaTeX, not prose, and renders as a formula.
+    public static let math          = InlineStyle(rawValue: 1 << 4)
 }
 
 /// One stretch of visible text with uniform styling.

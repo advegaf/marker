@@ -36,6 +36,11 @@ final class DocumentToolbar: NSObject, NSToolbarDelegate, NSMenuDelegate {
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
         // Everything is right aligned: the document is the subject, the controls are
         // secondary, and a left-aligned control would compete with the title.
+        // Left as four items. NSToolbarItemGroup was tried and rendered exactly the
+        // same: on macOS 26 each item gets its own glass capsule regardless, and
+        // sharing one background needs the items to collapse into a single
+        // NSSegmentedControl, which would cost the theme menu its chevron. A group
+        // that changes nothing is complexity with no result.
         [.flexibleSpace, ItemID.textSize, ItemID.theme, ItemID.find, ItemID.edit]
     }
 

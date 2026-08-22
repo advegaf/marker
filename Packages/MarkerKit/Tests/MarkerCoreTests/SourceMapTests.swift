@@ -11,6 +11,20 @@ private func parse(_ markdown: String) -> (MarkdownSource, MarkdownParser.Result
     return (source, MarkdownParser.parse(source))
 }
 
+/// Math runs are the one place a run's source range is deliberately wider than its
+/// text: the range covers `$…$` including the delimiters, so selecting the formula
+/// selects the thing an author would want to edit, while the text is the LaTeX the
+/// renderer is handed.
+private func assertRunMapsBack(_ run: InlineRun, in source: MarkdownSource, label: String) {
+    if run.style.contains(.math) {
+        #expect(source.slice(run.sourceRange) == "$\(run.text)$",
+                "\(label) math run does not cover its delimiters")
+    } else {
+        #expect(SourceVerifier.produces(run.text, at: run.sourceRange, in: source),
+                "\(label) range \(run.sourceRange) does not produce <<<\(run.text)>>>")
+    }
+}
+
 /// Asserts the round trip for every run the lowering claims is exact.
 private func assertRunsSliceBack(_ markdown: String, file: String = #file, line: Int = #line) {
     let (source, result) = parse(markdown)
@@ -21,10 +35,7 @@ private func assertRunsSliceBack(_ markdown: String, file: String = #file, line:
             guard !run.sourceRange.isEmpty else { continue }
             // Checked through the same verifier the lowering used, recovered runs
             // included. A recovered range is still a correct range.
-            #expect(
-                SourceVerifier.produces(run.text, at: run.sourceRange, in: source),
-                "run \(run.id.value) range \(run.sourceRange) does not produce <<<\(run.text)>>>"
-            )
+            assertRunMapsBack(run, in: source, label: "run \(run.id.value)")
         }
         #expect(source.slice(block.sourceRange) != nil,
                 "block \(block.id.value) has an out of bounds range")
@@ -182,8 +193,7 @@ private func assertRunsSliceBack(_ markdown: String, file: String = #file, line:
     #expect(!result.blocks.isEmpty)
     for block in result.blocks {
         for run in block.runs where !run.sourceRange.isEmpty {
-            #expect(SourceVerifier.produces(run.text, at: run.sourceRange, in: source),
-                    "block \(block.id.value) run \(run.id.value) does not slice back")
+            assertRunMapsBack(run, in: source, label: "block \(block.id.value) run \(run.id.value)")
         }
     }
     // No block in the corpus should be untrustworthy. If this ever fails, the

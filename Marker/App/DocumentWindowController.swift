@@ -11,6 +11,11 @@ final class DocumentWindowController: NSWindowController {
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 900, height: 700),
+            // fullSizeContentView stays. Dropping it gave Liquid Glass an opaque
+            // title bar sitting on a translucent page, which is a harder seam than
+            // the thing it was meant to fix. Content passing under a translucent
+            // title bar is what macOS 26 does; AppKit insets the scroll view so
+            // nothing overlaps at rest, and only a scrolled page shows through.
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
