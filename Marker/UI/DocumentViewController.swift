@@ -110,6 +110,7 @@ final class DocumentViewController: NSViewController {
         }
         applyEditMode()
         typeFromLaunchEnvironmentIfNeeded()
+        findFromLaunchEnvironmentIfNeeded()
 
         // Fold a finished pinch into the zoom factor and re-render at real point
         // sizes, rather than leaving the scroll view scaling a rasterised layer.
@@ -631,6 +632,41 @@ final class DocumentViewController: NSViewController {
         textView.performTextFinderAction(
             NSMenuItem(title: "", action: nil, keyEquivalent: "").withFinderTag(.showFindInterface)
         )
+    }
+
+    /// `MARKER_FIND=<query>` opens the find bar already searching.
+    ///
+    /// "Every match highlighted" is one of the app's headline claims and there was
+    /// no way to capture it: NSTextFinder owns the find bar and does not expose its
+    /// field. The find pasteboard is the supported way in. NSTextFinder seeds
+    /// itself from it when the interface opens, which is the same mechanism that
+    /// makes a search carry between apps.
+    private func findFromLaunchEnvironmentIfNeeded() {
+        guard isHarnessTarget,
+              let query = ProcessInfo.processInfo.environment["MARKER_FIND"],
+              !query.isEmpty else { return }
+
+        // Seeding the find pasteboard and stepping to the next match was tried
+        // first and produced a find bar holding the query with a match count of 0
+        // and exactly one match highlighted. Incremental searching only starts when
+        // the finder is given a search string through its own client, which is what
+        // `setSearchString` does: it takes the string from the current selection.
+        // So select an occurrence in the document, hand it over, then open the bar.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard let self else { return }
+            let haystack = self.textView.string as NSString
+            let found = haystack.range(of: query, options: [.caseInsensitive])
+            guard found.location != NSNotFound else {
+                FileHandle.standardError.write(Data("MARKER_FIND: \(query) not in this document\n".utf8))
+                self.showFindBar()
+                return
+            }
+            self.textView.setSelectedRange(found)
+            self.textView.performTextFinderAction(
+                NSMenuItem(title: "", action: nil, keyEquivalent: "").withFinderTag(.setSearchString)
+            )
+            self.showFindBar()
+        }
     }
 
     /// The measure is computed against a width, and `applyMeasure` deliberately
