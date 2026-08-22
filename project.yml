@@ -17,7 +17,7 @@ settings:
     SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
     SWIFT_APPROACHABLE_CONCURRENCY: YES
     DEAD_CODE_STRIPPING: YES
-    MARKETING_VERSION: "0.1.0"
+    MARKETING_VERSION: "1.0.0"
     CURRENT_PROJECT_VERSION: "1"
     # Ad-hoc signed for local development, the way Wave signs its release DMG.
     # No provisioning profile to fetch, no team to configure, and it still

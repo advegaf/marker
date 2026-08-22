@@ -92,6 +92,7 @@ private struct SettingsView: View {
 enum Preferences {
     static let updateKey = "MarkerUpdateCheckEnabled"
     static let remoteImagesKey = "MarkerRemoteImagesEnabled"
+    static let welcomeKey = "MarkerHasSeenWelcome"
 
     static var updateCheckEnabled: Bool {
         get { UserDefaults.standard.object(forKey: updateKey) as? Bool ?? true }
@@ -101,5 +102,11 @@ enum Preferences {
     static var remoteImagesEnabled: Bool {
         get { UserDefaults.standard.object(forKey: remoteImagesKey) as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: remoteImagesKey) }
+    }
+
+    /// Defaults to false so a fresh install shows the walkthrough once.
+    static var hasSeenWelcome: Bool {
+        get { UserDefaults.standard.bool(forKey: welcomeKey) }
+        set { UserDefaults.standard.set(newValue, forKey: welcomeKey) }
     }
 }

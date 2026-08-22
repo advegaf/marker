@@ -7,10 +7,25 @@ final class MarkerApp: NSObject, NSApplicationDelegate {
     /// appearance updates every open window from one place.
     static let appearance = AppearanceController()
 
+    /// Set for the launch that showed the walkthrough, so the open panel stays out
+    /// of its way. Not persisted: it is about this launch, not this install.
+    private var presentedWelcome = false
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         MainMenu.install()
         Self.appearance.applyToApplication()
         openFileFromLaunchEnvironmentIfNeeded()
+        if WelcomeWindowController.shouldShowAtLaunch {
+            // Closing the window with the red button counts as having seen it, the
+            // same as either of its own buttons. Otherwise it comes back on every
+            // launch until someone presses the right thing.
+            Preferences.hasSeenWelcome = true
+            presentedWelcome = true
+            WelcomeWindowController.shared.showWindow(nil)
+            if let window = WelcomeWindowController.shared.window {
+                WindowSnapshot.holdIfRequested(window: window)
+            }
+        }
         if ProcessInfo.processInfo.environment["MARKER_SETTINGS"] != nil {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                 SettingsWindowController.shared.showWindow(nil)
@@ -42,10 +57,25 @@ final class MarkerApp: NSObject, NSApplicationDelegate {
         SettingsWindowController.shared.showWindow(sender)
     }
 
+    @objc func showWelcome(_ sender: Any?) {
+        WelcomeWindowController.shared.showWindow(sender)
+    }
+
     func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
         // A viewer with no document should show the open panel, not a blank page.
         // Never under XCTest: the panel is modal, so it parks the run loop and the
         // test host hangs until something kills it.
+        // Not on the launch that shows the walkthrough. A modal open panel over
+        // the welcome window means the first thing a new user sees is a file
+        // browser covering the thing explaining the app.
+        //
+        // Both halves are needed because AppKit does not guarantee this is asked
+        // after `applicationDidFinishLaunching`. Asked first, the stored key has
+        // not been written yet and `shouldShowAtLaunch` is the one that answers;
+        // asked second, the key is already set and `presentedWelcome` is. Checking
+        // only the flag shipped a build where the panel opened over the welcome
+        // window anyway.
+        guard !presentedWelcome, !WelcomeWindowController.shouldShowAtLaunch else { return false }
         let environment = ProcessInfo.processInfo.environment
         return environment["MARKER_OPEN"] == nil
             && environment["XCTestConfigurationFilePath"] == nil

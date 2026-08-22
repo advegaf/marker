@@ -19,6 +19,25 @@ enum WindowSnapshot {
         return environment["MARKER_WINDOW_SNAPSHOT"] != nil || environment["MARKER_WINDOW_HOLD"] != nil
     }
 
+    /// Reports a non-document window's number under `MARKER_WINDOW_HOLD`.
+    ///
+    /// The document path below is driven by a `DocumentViewController` and reports
+    /// scroll metrics with it. The walkthrough and Settings have neither, but they
+    /// still need capturing, and resolving them from outside by owner name picks
+    /// the largest window belonging to *any* Marker process. A leftover instance,
+    /// or one still animating shut, wins that race and the shot silently shows the
+    /// wrong window. The app knows which window it just put on screen.
+    static func holdIfRequested(window: NSWindow) {
+        guard ProcessInfo.processInfo.environment["MARKER_WINDOW_HOLD"] != nil else { return }
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        // Long enough for the entrance to finish, so the number is reported only
+        // once there is something settled to shoot.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+            FileHandle.standardOutput.write(Data("windownumber=\(window.windowNumber)\n".utf8))
+        }
+    }
+
     /// Called once the document window exists. Waits for one layout pass, applies
     /// any requested scroll, captures, reports metrics on stdout, then exits.
     static func captureThenExit(controller: DocumentViewController, window: NSWindow) {

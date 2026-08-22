@@ -15,6 +15,7 @@ enum MainMenu {
         main.addItem(formatMenuItem())
         main.addItem(viewMenuItem())
         main.addItem(windowMenuItem(applicationMenu: main))
+        main.addItem(helpMenuItem())
         NSApp.mainMenu = main
     }
 
@@ -132,6 +133,20 @@ enum MainMenu {
 
         let root = NSMenuItem(title: "View", action: nil, keyEquivalent: "")
         root.submenu = menu
+        return root
+    }
+
+    /// Help exists mostly so the walkthrough is reachable a second time.
+    ///
+    /// A first-run window that can never be opened again is a window most people
+    /// dismiss before reading, and then there is no way back to it.
+    private static func helpMenuItem() -> NSMenuItem {
+        let menu = NSMenu(title: "Help")
+        menu.addItem(item("Welcome to Marker", #selector(MarkerApp.showWelcome(_:))))
+
+        let root = NSMenuItem(title: "Help", action: nil, keyEquivalent: "")
+        root.submenu = menu
+        NSApp.helpMenu = menu
         return root
     }
 

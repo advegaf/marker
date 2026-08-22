@@ -1,14 +1,32 @@
 #!/usr/bin/env bash
 # Captures the real Marker window through the window server.
 #
-# Usage: Scripts/window-shot.sh <out.png> [env assignments...]
+# Usage: Scripts/window-shot.sh [--shadow] [--any-window] <out.png> [env assignments...]
 #   Scripts/window-shot.sh QA/evidence/APP-3.png MARKER_OPEN=QA/fixtures/long.md MARKER_SCROLL=bottom
+#   Scripts/window-shot.sh --shadow --any-window docs/images/welcome.png MARKER_WELCOME=1
 #
 # In-process capture cannot see TextKit 2's layer-drawn text, so the app holds the
 # window open, reports its number, and screencapture takes the shot. Needs Screen
 # Recording permission for the terminal, granted once.
+#
+#   --shadow      keep the window server's drop shadow and alpha. Evidence rows
+#                 want it off, since the shadow is noise around the thing under
+#                 test; README shots want it on, because it is macOS drawing its
+#                 own window and no redrawn frame can match it.
+#
+# Any window the app can put on screen reports its own number under
+# MARKER_WINDOW_HOLD, documents and the walkthrough alike, so there is one code
+# path here and no guessing which window belongs to which process.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
+SHADOW=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --shadow) SHADOW=1; shift ;;
+    *) break ;;
+  esac
+done
 
 OUT="$1"; shift
 APP="$(xcodebuild -project Marker.xcodeproj -scheme Marker -configuration Debug \
@@ -16,16 +34,32 @@ APP="$(xcodebuild -project Marker.xcodeproj -scheme Marker -configuration Debug 
 
 mkdir -p "$(dirname "$OUT")"
 META="$(mktemp)"
+
+# Any Marker still running from an earlier shot owns windows too, and
+# window-id.swift resolves by owner across every process. A leftover instance
+# with a document open is larger than the panel being captured, so it wins and
+# the shot silently shows the wrong window.
+pkill -x Marker 2>/dev/null || true
+# Long enough for the old window to finish tearing down. At 0.4s the compositor
+# is still winding it up while the new one appears, and screencapture answers
+# "could not create image from window" for a window that is plainly on screen.
+/usr/bin/osascript -e 'delay 1.5' >/dev/null 2>&1
 env "$@" MARKER_WINDOW_HOLD=1 "$APP/Contents/MacOS/Marker" > "$META" 2>/dev/null &
 APP_PID=$!
 
-# Wait for the window number rather than sleeping a fixed amount.
+# Poll rather than sleeping a fixed amount, so a slow first launch does not
+# produce a shot of an empty screen.
+WINDOW=""
 for _ in $(seq 1 60); do
-  grep -q windownumber= "$META" && break
+  WINDOW="$(sed -n 's/.*windownumber=\([0-9]*\).*/\1/p' "$META" | head -1)"
+  [ -n "$WINDOW" ] && break
   /usr/bin/osascript -e 'delay 0.25' >/dev/null 2>&1
 done
 
-WINDOW="$(sed -n 's/.*windownumber=\([0-9]*\).*/\1/p' "$META" | head -1)"
+# Let entrance animations finish and fonts settle. Without this the shot catches
+# a staggered list halfway in, which looks like a rendering bug rather than motion.
+/usr/bin/osascript -e 'delay 1.2' >/dev/null 2>&1
+
 METRICS="$(grep -o 'document=.*' "$META" | head -1 || true)"
 
 if [ -z "$WINDOW" ]; then
@@ -35,10 +69,16 @@ if [ -z "$WINDOW" ]; then
   exit 1
 fi
 
-screencapture -x -o -l"$WINDOW" "$OUT"
+if [ "$SHADOW" -eq 1 ]; then
+  screencapture -x -l"$WINDOW" "$OUT"
+else
+  screencapture -x -o -l"$WINDOW" "$OUT"
+fi
 kill "$APP_PID" 2>/dev/null || true
 wait "$APP_PID" 2>/dev/null || true
 rm -f "$META"
 
 echo "$OUT"
-[ -n "$METRICS" ] && echo "$METRICS"
+# Plain `[ -n ... ] && echo` as the last line makes the script exit 1 whenever
+# there are no metrics, which is every non-document shot.
+if [ -n "$METRICS" ]; then echo "$METRICS"; fi
