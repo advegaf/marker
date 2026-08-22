@@ -7,6 +7,10 @@ final class MarkerApp: NSObject, NSApplicationDelegate {
     /// appearance updates every open window from one place.
     static let appearance = AppearanceController()
 
+    /// One store for the whole app. The trial clock and the stored licence are
+    /// process-wide facts, not per-document ones.
+    static let license = LicenseStore()
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         MainMenu.install()
         Self.appearance.applyToApplication()

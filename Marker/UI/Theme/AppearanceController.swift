@@ -18,6 +18,9 @@ public final class AppearanceController {
         let stored = UserDefaults.standard.string(forKey: Self.defaultsKey)
         let forced = ProcessInfo.processInfo.environment["MARKER_THEME"]
         appearance = (forced ?? stored).flatMap(MarkerTheme.Appearance.init(rawValue:)) ?? .glass
+        // Republished at launch so a fresh install, or a preview taken before the
+        // theme was ever changed, still matches the app.
+        ThemeBridge.publish(appearance)
 
         NSWorkspace.shared.notificationCenter.addObserver(
             self,
@@ -57,6 +60,7 @@ public final class AppearanceController {
         guard new != appearance else { return }
         appearance = new
         UserDefaults.standard.set(new.rawValue, forKey: Self.defaultsKey)
+        ThemeBridge.publish(new)
         applyToApplication()
         NotificationCenter.default.post(name: .markerAppearanceDidChange, object: nil)
     }

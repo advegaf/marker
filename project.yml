@@ -72,6 +72,10 @@ targets:
         PRODUCT_NAME: MarkerQuickLook
         INFOPLIST_FILE: MarkerQuickLook/Info.plist
         CODE_SIGN_ENTITLEMENTS: MarkerQuickLook/MarkerQuickLook.entitlements
+        # Sandboxed, and not optional: macOS refuses to register a Quick Look
+        # preview extension that is not, and silently falls back to the built-in
+        # plain-text preview. Turning it off was tried and the extension vanished
+        # from `pluginkit` entirely.
         ENABLE_APP_SANDBOX: true
         ENABLE_HARDENED_RUNTIME: true
         SKIP_INSTALL: YES

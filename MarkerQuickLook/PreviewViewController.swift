@@ -13,12 +13,37 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
     private var textView: MarkdownTextView!
     private var source = MarkdownSource("")
 
-    /// The extension is sandboxed and cannot read the app's theme preference
-    /// without an app group, so the preview follows the system appearance. That is
-    /// a known limitation rather than a defect, and the CSV records it as one.
+    /// The preview uses the theme chosen in the app's Settings, not the system
+    /// appearance. Pressing space on a file should look like the app that owns it.
+    ///
+    /// The app writes the chosen theme into this extension's own container, which
+    /// the sandbox always allows reading. Preferences cannot be shared directly:
+    /// a Quick Look extension must be sandboxed, and a sandboxed one cannot read the
+    /// host app's defaults without an app group.
+    ///
+    /// Read fresh each time rather than cached, because the panel is created per
+    /// preview and the theme may have changed since the last one.
+    private var storedAppearance: MarkerTheme.Appearance? {
+        let file = URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent("Library/Application Support/marker-theme.json")
+        guard let data = try? Data(contentsOf: file),
+              let payload = try? JSONSerialization.jsonObject(with: data) as? [String: String],
+              let raw = payload["appearance"]
+        else { return nil }
+        return MarkerTheme.Appearance(rawValue: raw)
+    }
+
     private var theme: MarkerTheme {
+        let appearance = storedAppearance ?? .glass
         let isDark = view.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        return .standard(isDark ? .dark : .light)
+        // Liquid Glass follows the system here too, and resolves opaque: a Quick
+        // Look panel is already a translucent surface, so a translucent page inside
+        // it would be unreadable.
+        return .resolve(
+            appearance: appearance,
+            systemIsDark: isDark,
+            reduceTransparency: true
+        )
     }
 
     override func loadView() {
