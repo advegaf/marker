@@ -26,7 +26,7 @@ shot math      light MARKER_OPEN=QA/fixtures/math.md         MARKER_THEME=light
 shot code      dark  MARKER_OPEN=QA/fixtures/languages.md    MARKER_THEME=dark
 shot tables    light MARKER_OPEN=QA/fixtures/tables.md       MARKER_THEME=light
 shot find      dark  MARKER_OPEN=QA/fixtures/kitchen-sink.md MARKER_THEME=dark MARKER_FIND=item
-shot editing   dark  MARKER_OPEN=QA/fixtures/plain.md        MARKER_THEME=dark MARKER_EDIT=1
+shot editing   dark  MARKER_OPEN=QA/fixtures/kitchen-sink.md MARKER_THEME=dark MARKER_EDIT=1
 shot welcome   dark  MARKER_WELCOME=1
 
 # Quick Look goes to QA evidence, not to docs/images.

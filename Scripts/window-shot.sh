@@ -40,10 +40,16 @@ META="$(mktemp)"
 # with a document open is larger than the panel being captured, so it wins and
 # the shot silently shows the wrong window.
 pkill -x Marker 2>/dev/null || true
-# Long enough for the old window to finish tearing down. At 0.4s the compositor
-# is still winding it up while the new one appears, and screencapture answers
-# "could not create image from window" for a window that is plainly on screen.
-/usr/bin/osascript -e 'delay 1.5' >/dev/null 2>&1
+# Wait for the old process to actually exit, then let its window finish tearing
+# down. Sleeping a fixed amount was wrong twice over: too short and screencapture
+# answers "could not create image from window" for a window that is plainly on
+# screen, and a window caught mid-teardown is still in the window list at a
+# shrinking size, which reads as the app collapsing its own window.
+for _ in $(seq 1 40); do
+  pgrep -x Marker >/dev/null 2>&1 || break
+  /usr/bin/osascript -e 'delay 0.25' >/dev/null 2>&1
+done
+/usr/bin/osascript -e 'delay 0.8' >/dev/null 2>&1
 env "$@" MARKER_WINDOW_HOLD=1 "$APP/Contents/MacOS/Marker" > "$META" 2>/dev/null &
 APP_PID=$!
 
@@ -69,13 +75,35 @@ if [ -z "$WINDOW" ]; then
   exit 1
 fi
 
-if [ "$SHADOW" -eq 1 ]; then
-  screencapture -x -l"$WINDOW" "$OUT"
-else
-  screencapture -x -o -l"$WINDOW" "$OUT"
+# screencapture intermittently answers "could not create image from window" for a
+# window that is on screen, alpha 1, and correctly sized. It is a race inside the
+# window server, not a wrong window number. Edit mode fails most often, which fits:
+# the caret blinks, so the window is redrawing continuously. Retrying across
+# several blink cycles clears it. A shot pipeline that dies one image into eight is
+# worse than one that waits.
+CAPTURED=0
+for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+  if [ "$SHADOW" -eq 1 ]; then
+    screencapture -x -l"$WINDOW" "$OUT" 2>/dev/null && CAPTURED=1 && break
+  else
+    screencapture -x -o -l"$WINDOW" "$OUT" 2>/dev/null && CAPTURED=1 && break
+  fi
+  /usr/bin/osascript -e 'delay 1.0' >/dev/null 2>&1
+done
+
+if [ "$CAPTURED" -eq 0 ]; then
+  echo "screencapture failed for window $WINDOW after 12 attempts" >&2
+  kill "$APP_PID" 2>/dev/null || true
+  exit 1
 fi
 kill "$APP_PID" 2>/dev/null || true
 wait "$APP_PID" 2>/dev/null || true
+# Do not return while this shot's window is still tearing down: the next call in a
+# batch would otherwise resolve or capture against a shrinking ghost.
+for _ in $(seq 1 40); do
+  pgrep -x Marker >/dev/null 2>&1 || break
+  /usr/bin/osascript -e 'delay 0.25' >/dev/null 2>&1
+done
 rm -f "$META"
 
 echo "$OUT"

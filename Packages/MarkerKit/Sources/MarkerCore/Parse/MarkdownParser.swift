@@ -20,7 +20,24 @@ public enum MarkdownParser {
     }
 
     public static func parse(_ source: MarkdownSource) -> Result {
-        let document = Document(parsing: source.text, options: [.parseBlockDirectives])
+        // `disableSmartOpts` is not a style preference, it is a correctness requirement.
+        //
+        // cmark's smart punctuation rewrites the text of a node: ' becomes a curly
+        // ’, " becomes “ ”, -- becomes an en dash, ... becomes an ellipsis. The
+        // source range it reports still covers the original bytes, so verify-by-slice
+        // compares a 3-byte ’ against a 1-byte ' and fails. The block is then marked
+        // opaque and renders as raw Markdown in a monospaced panel. Any English
+        // paragraph containing an apostrophe hit this, which is most of them.
+        //
+        // Turning it off is also the honest choice for this app: the page is meant
+        // to show what is in the file. Silently displaying punctuation the author
+        // did not type is exactly the normalisation that byte splicing exists to
+        // avoid, and it would put multi-byte characters in the render that do not
+        // exist in the source for the offset mapping to line up against.
+        let document = Document(
+            parsing: source.text,
+            options: [.parseBlockDirectives, .disableSmartOpts]
+        )
         var lowering = ASTLowering(source: source)
         lowering.visit(document)
         return Result(
