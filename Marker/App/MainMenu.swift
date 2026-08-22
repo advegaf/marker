@@ -102,6 +102,9 @@ enum MainMenu {
 
     private static func viewMenuItem() -> NSMenuItem {
         let menu = NSMenu(title: "View")
+        menu.addItem(item("Markdown Source", #selector(DocumentViewController.toggleSourceMode(_:)), "s",
+                          modifiers: [.command, .option]))
+        menu.addItem(.separator())
         menu.addItem(item("Actual Size", #selector(DocumentViewController.resetZoom(_:)), "0"))
         menu.addItem(item("Zoom In", #selector(DocumentViewController.zoomIn(_:)), "+"))
         menu.addItem(item("Zoom Out", #selector(DocumentViewController.zoomOut(_:)), "-"))

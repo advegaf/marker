@@ -55,10 +55,31 @@ struct ASTLowering: MarkupWalker {
         let language = codeBlock.language?.trimmingCharacters(in: .whitespaces)
         // Trailing newline is a fence artefact, not content.
         let code = String(codeBlock.code.dropLast(codeBlock.code.hasSuffix("\n") ? 1 : 0))
-        let kind: BlockKind = (language?.lowercased() == "mermaid")
-            ? .mermaid(source: code)
-            : .codeFence(language: language?.isEmpty == true ? nil : language, code: code)
-        append(kind: kind, range: byteRange(of: codeBlock), runs: [])
+        let range = byteRange(of: codeBlock)
+        if language?.lowercased() == "mermaid" {
+            append(kind: .mermaid(source: code), range: range, runs: [])
+            return
+        }
+
+        // One run covering the code itself, so a code block can be edited in place
+        // rather than only through the source editor. The run excludes the fence
+        // markers, which is what makes typing inside a block leave the fence alone.
+        var runs: [InlineRun] = []
+        if !code.isEmpty, let codeRange = codeContentRange(in: range, code: code) {
+            runs.append(InlineRun(
+                id: RunID(nextRunID),
+                sourceRange: codeRange,
+                text: code,
+                style: .code,
+                confidence: SourceVerifier.produces(code, at: codeRange, in: source) ? .exact : .recovered
+            ))
+            nextRunID += 1
+        }
+        append(
+            kind: .codeFence(language: language?.isEmpty == true ? nil : language, code: code),
+            range: range,
+            runs: runs
+        )
     }
 
     mutating func visitThematicBreak(_ thematicBreak: ThematicBreak) {
@@ -308,6 +329,19 @@ struct ASTLowering: MarkupWalker {
             linkURL: linkURL
         ))
         nextRunID += 1
+    }
+
+    /// Where the code sits inside a fenced block's source range.
+    ///
+    /// Found by locating the code rather than by counting fence characters, because
+    /// a fence can be backticks or tildes, three or more of them, with or without a
+    /// language, and indented inside a list.
+    private func codeContentRange(in blockRange: Range<Int>, code: String) -> Range<Int>? {
+        guard let raw = source.slice(blockRange) else { return nil }
+        guard let found = raw.range(of: code) else { return nil }
+        let offset = raw[raw.startIndex ..< found.lowerBound].utf8.count
+        let start = blockRange.lowerBound + offset
+        return start ..< (start + code.utf8.count)
     }
 
     // MARK: Ranges

@@ -7,7 +7,12 @@ final class DocumentViewController: NSViewController {
 
     /// Reading is the default and nothing enters editing on its own. The product is
     /// a viewer first, so the caret has to be asked for.
-    enum EditMode { case reading, editing }
+    ///
+    /// `editing` is the rendered page with a caret in it, which is what the product
+    /// promises. `source` shows the raw markdown, which is what you want when a
+    /// construct cannot be edited on the page, or when you would simply rather see
+    /// the marks.
+    enum EditMode { case reading, editing, source }
 
     private(set) var editMode: EditMode = .reading
 
@@ -23,6 +28,10 @@ final class DocumentViewController: NSViewController {
 
     private let zoom = ZoomController()
     private let slashMenu = SlashCommandMenu()
+    private var mirror: WYSIWYGMirror!
+    /// The map describing what is currently on screen, kept so slash commands and
+    /// the caret guard can ask where a render offset came from.
+    private var renderIndex: BlockIndex = .empty
 
     private var theme: MarkerTheme {
         MarkerApp.appearance.theme(for: viewIfLoaded, zoom: zoom.scale)
@@ -69,6 +78,23 @@ final class DocumentViewController: NSViewController {
         view = container
         // The watcher delivers on the main queue, so bridging back to the main actor
         // here is a statement of that fact rather than a hop.
+        mirror = WYSIWYGMirror(textView: textView)
+        mirror.currentSource = { [weak self] in self?.document.source ?? MarkdownSource("") }
+        mirror.applyEdit = { [weak self] edit in
+            guard let self else { return }
+            var source = self.document.source
+            source.apply(edit)
+            self.document.replaceSource(with: source.text)
+        }
+        mirror.render = { [weak self] source in
+            guard let self else { return (NSAttributedString(), .empty) }
+            let rendered = DocumentRenderer(theme: self.theme, mode: .interactive)
+                .renderDocument(source)
+            self.renderIndex = rendered.index
+            return (rendered.attributed, rendered.index)
+        }
+        mirror.onRefusal = { [weak self] refusal in self?.explain(refusal) }
+
         slashMenu.onPick = { [weak self] command in self?.insert(command) }
         document.onExternalChange = { [weak self] change in
             MainActor.assumeIsolated { self?.fileChanged(change) }
@@ -76,9 +102,13 @@ final class DocumentViewController: NSViewController {
         applyAppearance()
         // The harness needs to be able to open straight into edit mode, since the
         // EDT and TB rows are about what the window looks like in that state.
-        if ProcessInfo.processInfo.environment["MARKER_EDIT"] != nil,
-           MarkerApp.license.state.allowsEditing {
-            editMode = .editing
+        if MarkerApp.license.state.allowsEditing {
+            // Two flags, because the QA rows for the two editors are different.
+            if ProcessInfo.processInfo.environment["MARKER_SOURCE"] != nil {
+                editMode = .source
+            } else if ProcessInfo.processInfo.environment["MARKER_EDIT"] != nil {
+                editMode = .editing
+            }
         }
         applyEditMode()
         typeFromLaunchEnvironmentIfNeeded()
@@ -257,19 +287,31 @@ final class DocumentViewController: NSViewController {
         let width = max(scrollView.contentSize.width, 320)
         let renderer = DocumentRenderer(theme: theme, mode: .interactive)
         let content: NSAttributedString
-        if editMode == .editing {
+        if editMode == .source {
             // The source editor shows markdown the user is about to type into, so it
             // is left uncoloured. Colouring it as code would misdescribe it.
             content = renderer.renderPlain(document.source.text)
         } else {
             switch document.presentation {
-            case .markdown: content = renderer.render(document.source)
+            case .markdown:
+                let rendered = renderer.renderDocument(document.source)
+                renderIndex = rendered.index
+                mirror?.adopt(index: rendered.index)
+                content = rendered.attributed
             case .json: content = renderer.renderPlain(document.source.text, language: "json")
             case .yaml: content = renderer.renderPlain(document.source.text, language: "yaml")
             case .plainText: content = renderer.renderPlain(document.source.text)
             }
         }
-        textView.setContent(content, theme: theme, availableWidth: width)
+        // Every write to the storage that did not come from a keystroke has to be
+        // marked as derived, or the mirror maps it back into the source.
+        if let mirror {
+            mirror.performingDerivedUpdate {
+                textView.setContent(content, theme: theme, availableWidth: width)
+            }
+        } else {
+            textView.setContent(content, theme: theme, availableWidth: width)
+        }
     }
 
     // MARK: Edit mode
@@ -302,17 +344,51 @@ final class DocumentViewController: NSViewController {
     }
 
     private func applyEditMode() {
-        let editing = editMode == .editing
-        if !editing { slashMenu.hide() }
-        textView.isEditable = editing
-        // AppKit's undo stack is correct here and only here. In source mode the
-        // storage is the source, so its ranges stay valid. The ban on it applies to
-        // the rendered path, where a re-render replaces block text underneath ranges
-        // the undo stack is still holding.
-        textView.allowsUndo = editing
-        textView.delegate = editing ? self : nil
+        let editable = editMode != .reading
+        if !editable { slashMenu.hide() }
+        textView.isEditable = editable
+        // AppKit's undo stack is correct in source mode and only there: the storage
+        // is the source, so its ranges stay valid. In the rendered path a re-render
+        // replaces block text underneath ranges the undo stack is still holding,
+        // which is a guaranteed corruption source.
+        textView.allowsUndo = editMode == .source
+        textView.delegate = editable ? self : nil
+        // The mirror only watches the rendered path. In source mode the storage is
+        // the source already and there is nothing to map.
+        textView.textStorage?.delegate = editMode == .editing ? mirror : nil
         render()
-        if editing { view.window?.makeFirstResponder(textView) }
+        if editable { view.window?.makeFirstResponder(textView) }
+    }
+
+    /// Says why a keystroke did not land, once, quietly.
+    ///
+    /// Silently swallowing it is what makes an editor feel broken, and an alert for
+    /// every refused character would be worse. The window title bar carries it.
+    private func explain(_ refusal: EditMapper.Refusal) {
+        let message: String
+        switch refusal {
+        case .syntheticText: message = "That part is drawn from the markdown and cannot be typed over."
+        case .attachment: message = "Edit this through its own controls, or switch to the markdown source."
+        case .crossesBlocks: message = "That edit spans two blocks. Switch to the markdown source for it."
+        case .opaqueBlock: message = "This block could not be mapped. Switch to the markdown source to edit it."
+        }
+        view.window?.subtitle = message
+        // Cleared on the next successful edit or after a moment, so it does not
+        // become a permanent accusation.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+            if self?.view.window?.subtitle == message { self?.view.window?.subtitle = "" }
+        }
+    }
+
+    /// Toggles the raw markdown view, for anything the page cannot edit in place.
+    @objc func toggleSourceMode(_ sender: Any?) {
+        guard MarkerApp.license.state.allowsEditing || editMode == .source else {
+            presentTrialEnded()
+            return
+        }
+        editMode = editMode == .source ? .reading : .source
+        applyEditMode()
+        onEditModeChange?()
     }
 
     /// `MARKER_TYPE=/tab` types into the editor at launch, so a QA run can reach the
@@ -320,14 +396,25 @@ final class DocumentViewController: NSViewController {
     /// keystroke does rather than setting the string directly, or it would prove
     /// nothing about the trigger.
     private func typeFromLaunchEnvironmentIfNeeded() {
-        guard editMode == .editing,
+        guard editMode != .reading,
               let text = ProcessInfo.processInfo.environment["MARKER_TYPE"],
               isHarnessTarget else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            let end = NSRange(location: (self.textView.string as NSString).length, length: 0)
+            // `MARKER_CARET` places the caret by rendered offset first, so a QA run
+            // can type into a specific construct rather than only at the end.
+            let length = (self.textView.string as NSString).length
+            let requested = ProcessInfo.processInfo.environment["MARKER_CARET"].flatMap(Int.init)
+            let end = NSRange(location: min(requested ?? length, length), length: 0)
             self.textView.setSelectedRange(end)
             self.textView.insertText(text, replacementRange: end)
+            // The source is the thing under test in the rendered path: the display
+            // could look right while the file behind it is wrong.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                FileHandle.standardError.write(Data(
+                    "[source]\n\(self.document.source.text)\n[/source]\n".utf8
+                ))
+            }
 
             // `MARKER_PICK=1` then chooses the highlighted command, through the same
             // selector Return goes through, so the harness exercises the real path.
@@ -366,10 +453,10 @@ final class DocumentViewController: NSViewController {
     /// whether the slash was typed, pasted, or arrived by moving the caret back into
     /// a token that was already there.
     private func updateSlashMenu() {
-        guard editMode == .editing else { return slashMenu.hide() }
+        guard editMode != .reading else { return slashMenu.hide() }
 
         let caret = textView.selectedRange().location
-        let source = MarkdownSource(textView.string)
+        let source = editMode == .source ? MarkdownSource(textView.string) : document.source
         guard caret <= source.byteCount,
               let token = SlashCommandInsertion.activeToken(at: renderToSourceOffset(caret), in: source)
         else { return slashMenu.hide() }
@@ -393,16 +480,26 @@ final class DocumentViewController: NSViewController {
     /// UTF-16 against UTF-8. Converting through the string keeps multibyte text
     /// honest.
     private func renderToSourceOffset(_ location: Int) -> Int {
-        let text = textView.string as NSString
-        guard location <= text.length else { return 0 }
-        return text.substring(to: location).utf8.count
+        // Source mode: the storage is the source, so the two differ only by UTF-16
+        // against UTF-8.
+        if editMode == .source {
+            let text = textView.string as NSString
+            guard location <= text.length else { return 0 }
+            return text.substring(to: location).utf8.count
+        }
+        // Rendered mode: the storage is derived, so the block map is the only thing
+        // that knows where a render offset came from.
+        return renderIndex.sourceOffset(forRender: location) ?? 0
     }
 
     private func sourceToRenderOffset(_ byteOffset: Int) -> Int {
-        let bytes = Array(textView.string.utf8)
-        let clamped = max(0, min(byteOffset, bytes.count))
-        let prefix = String(bytes: bytes[0 ..< clamped], encoding: .utf8) ?? ""
-        return (prefix as NSString).length
+        if editMode == .source {
+            let bytes = Array(textView.string.utf8)
+            let clamped = max(0, min(byteOffset, bytes.count))
+            let prefix = String(bytes: bytes[0 ..< clamped], encoding: .utf8) ?? ""
+            return (prefix as NSString).length
+        }
+        return renderIndex.renderOffset(forSource: byteOffset) ?? 0
     }
 
     private func caretRect() -> NSRect {
@@ -424,7 +521,7 @@ final class DocumentViewController: NSViewController {
     }
 
     private func insert(_ command: SlashCommand) {
-        let source = MarkdownSource(textView.string)
+        let source = editMode == .source ? MarkdownSource(textView.string) : document.source
         let caret = renderToSourceOffset(textView.selectedRange().location)
         let debug = ProcessInfo.processInfo.environment["MARKER_DEBUG_SLASH"] != nil
         guard let token = SlashCommandInsertion.activeToken(at: caret, in: source) else {
@@ -433,6 +530,20 @@ final class DocumentViewController: NSViewController {
         }
 
         let result = SlashCommandInsertion.apply(command, replacing: token, in: source)
+
+        // In the rendered path the edit goes to the source and the page is rebuilt
+        // from it, rather than being typed into the storage.
+        if editMode == .editing {
+            var updated = source
+            updated.apply(result.edit)
+            document.replaceSource(with: updated.text)
+            render()
+            if let offset = renderIndex.renderOffset(forSource: result.caret) {
+                textView.setSelectedRange(NSRange(location: offset, length: 0))
+            }
+            return
+        }
+
         let replaceRange = NSRange(
             location: sourceToRenderOffset(token.lowerBound),
             length: sourceToRenderOffset(token.upperBound) - sourceToRenderOffset(token.lowerBound)
@@ -484,8 +595,17 @@ extension DocumentViewController: NSTextViewDelegate {
     /// In source mode the storage holds the raw markdown, so keeping the document in
     /// step is a straight copy. `NSDocument` then owns the dirty dot, the close
     /// sheet and ⌘S with no further code.
+    ///
+    /// **Only** in source mode. In the rendered path the storage holds derived text
+    /// with the markup stripped out of it, and copying that into the source replaces
+    /// the document with its own rendering: headings lose their hashes, bold loses
+    /// its asterisks, and the file is destroyed on the next save. The mirror owns
+    /// that path, and it maps edits back rather than copying them.
     func textDidChange(_ notification: Notification) {
-        guard editMode == .editing else { return }
+        guard editMode == .source else {
+            updateSlashMenu()
+            return
+        }
         document.replaceSource(with: textView.string)
         updateSlashMenu()
     }
