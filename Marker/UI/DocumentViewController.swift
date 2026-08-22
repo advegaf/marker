@@ -5,6 +5,16 @@ import MarkerRender
 /// Hosts the document surface: a scroll view over one TextKit 2 text view.
 final class DocumentViewController: NSViewController {
 
+    /// Reading is the default and nothing enters editing on its own. The product is
+    /// a viewer first, so the caret has to be asked for.
+    enum EditMode { case reading, editing }
+
+    private(set) var editMode: EditMode = .reading
+
+    /// Lets the window controller keep the toolbar's Edit button in step without the
+    /// view controller knowing the toolbar exists.
+    var onEditModeChange: (() -> Void)?
+
     private unowned let document: MarkerDocument
     private var scrollView: NSScrollView!
     private var textView: MarkdownTextView!
@@ -22,6 +32,8 @@ final class DocumentViewController: NSViewController {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("unavailable") }
+
+    deinit { NotificationCenter.default.removeObserver(self) }
 
     override func loadView() {
         let theme = self.theme
@@ -42,7 +54,12 @@ final class DocumentViewController: NSViewController {
         scrollView.maxMagnification = 3.0
 
         view = scrollView
-        render()
+        // The harness needs to be able to open straight into edit mode, since the
+        // EDT and TB rows are about what the window looks like in that state.
+        if ProcessInfo.processInfo.environment["MARKER_EDIT"] != nil {
+            editMode = .editing
+        }
+        applyEditMode()
 
         // Fold a finished pinch into the zoom factor and re-render at real point
         // sizes, rather than leaving the scroll view scaling a rasterised layer.
@@ -123,8 +140,40 @@ final class DocumentViewController: NSViewController {
     private func render() {
         let theme = self.theme
         let width = max(scrollView.contentSize.width, 320)
-        let rendered = DocumentRenderer(theme: theme, mode: .interactive).render(document.source)
-        textView.setContent(rendered, theme: theme, availableWidth: width)
+        let renderer = DocumentRenderer(theme: theme, mode: .interactive)
+        let content = editMode == .editing
+            ? renderer.renderPlain(document.source.text)
+            : renderer.render(document.source)
+        textView.setContent(content, theme: theme, availableWidth: width)
+    }
+
+    // MARK: Edit mode
+
+    func toggleEditMode() {
+        editMode = editMode == .reading ? .editing : .reading
+        applyEditMode()
+        onEditModeChange?()
+    }
+
+    private func applyEditMode() {
+        let editing = editMode == .editing
+        textView.isEditable = editing
+        // AppKit's undo stack is correct here and only here. In source mode the
+        // storage is the source, so its ranges stay valid. The ban on it applies to
+        // the rendered path, where a re-render replaces block text underneath ranges
+        // the undo stack is still holding.
+        textView.allowsUndo = editing
+        textView.delegate = editing ? self : nil
+        render()
+        if editing { view.window?.makeFirstResponder(textView) }
+    }
+
+    // MARK: Find
+
+    func showFindBar() {
+        textView.performTextFinderAction(
+            NSMenuItem(title: "", action: nil, keyEquivalent: "").withFinderTag(.showFindInterface)
+        )
     }
 
     /// The measure is computed against a width, and `applyMeasure` deliberately
@@ -142,5 +191,28 @@ final class DocumentViewController: NSViewController {
             // then, so the authoritative height is the one computed once it is.
             textView.sizeToFitContent(theme: theme, availableWidth: width)
         }
+    }
+}
+
+
+// MARK: - Source editing
+
+extension DocumentViewController: NSTextViewDelegate {
+
+    /// In source mode the storage holds the raw markdown, so keeping the document in
+    /// step is a straight copy. `NSDocument` then owns the dirty dot, the close
+    /// sheet and ⌘S with no further code.
+    func textDidChange(_ notification: Notification) {
+        guard editMode == .editing else { return }
+        document.replaceSource(with: textView.string)
+    }
+}
+
+private extension NSMenuItem {
+    /// `performTextFinderAction` reads the action off the sender's tag, so a
+    /// programmatic call needs a sender carrying one.
+    func withFinderTag(_ action: NSTextFinder.Action) -> NSMenuItem {
+        tag = action.rawValue
+        return self
     }
 }

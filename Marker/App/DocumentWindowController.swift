@@ -4,6 +4,7 @@ import MarkerRender
 final class DocumentWindowController: NSWindowController {
 
     private let viewController: DocumentViewController
+    private var toolbar: DocumentToolbar!
 
     init(document: MarkerDocument) {
         viewController = DocumentViewController(document: document)
@@ -14,8 +15,12 @@ final class DocumentWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.titlebarAppearsTransparent = true
+        // Not a transparent titlebar. With fullSizeContentView and nothing behind
+        // the title, scrolled text draws straight through it and collides with the
+        // filename. The unified toolbar gives the titlebar its own material.
+        window.titlebarAppearsTransparent = false
         window.titleVisibility = .visible
+        window.toolbarStyle = .unified
         window.contentViewController = viewController
         window.minSize = NSSize(width: 420, height: 320)
         // Assigning a contentViewController resizes the window to that view's fitting
@@ -25,6 +30,9 @@ final class DocumentWindowController: NSWindowController {
         window.center()
 
         super.init(window: window)
+        toolbar = DocumentToolbar(controller: viewController)
+        window.toolbar = toolbar.makeToolbar()
+        viewController.onEditModeChange = { [weak self] in self?.toolbar.syncEditItem() }
         // A harness run must not have its evidence polluted by windows macOS restored
         // from a previous session, and must not leave its own behind for the next run.
         if WindowSnapshot.isRequested { window.isRestorable = false }

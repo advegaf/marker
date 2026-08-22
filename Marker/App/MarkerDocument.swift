@@ -31,6 +31,15 @@ nonisolated final class MarkerDocument: NSDocument {
 
     override class var autosavesInPlace: Bool { false }
 
+    /// Replaces the source after an edit. The raw string stays the source of truth,
+    /// so saving is still a straight write with no serialisation step and no
+    /// reformatting of lines the user never touched.
+    func replaceSource(with text: String) {
+        guard text != source.text else { return }
+        source = MarkdownSource(text)
+        updateChangeCount(.changeDone)
+    }
+
     override func makeWindowControllers() {
         // Documented main-thread entry point.
         MainActor.assumeIsolated {
