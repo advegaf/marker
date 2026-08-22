@@ -30,9 +30,24 @@ public final class MarkdownTextView: NSTextView {
         // storage-space ranges that go stale the moment a re-render replaces a
         // block's text, which is a guaranteed corruption source.
         allowsUndo = false
+        // Every automatic substitution is off, and this is not a preference.
+        //
+        // A markdown editor that turns "quotes" into curly ones has changed the
+        // file's meaning. Worse, in the rendered path an automatic correction is a
+        // storage edit like any other, so the mirror faithfully maps it into the
+        // source: a word gets rewritten with no keystroke behind it, which is
+        // indistinguishable from the editor corrupting the document.
         isAutomaticQuoteSubstitutionEnabled = false
         isAutomaticDashSubstitutionEnabled = false
         isAutomaticTextReplacementEnabled = false
+        isAutomaticSpellingCorrectionEnabled = false
+        isContinuousSpellCheckingEnabled = false
+        isGrammarCheckingEnabled = false
+        isAutomaticDataDetectionEnabled = false
+        isAutomaticLinkDetectionEnabled = false
+        // Smart insert and delete adjusts spaces around a paste, which would show up
+        // as source bytes nobody typed.
+        smartInsertDeleteEnabled = false
         // We own the frame, not AppKit. With isVerticallyResizable on, NSTextView
         // recomputes its own height from TextKit 2's viewport layout on every layout
         // pass, which under TK2 means "however much is currently on screen". Two

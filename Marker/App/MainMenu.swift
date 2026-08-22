@@ -12,6 +12,7 @@ enum MainMenu {
         main.addItem(appMenuItem())
         main.addItem(fileMenuItem())
         main.addItem(editMenuItem())
+        main.addItem(formatMenuItem())
         main.addItem(viewMenuItem())
         main.addItem(windowMenuItem(applicationMenu: main))
         NSApp.mainMenu = main
@@ -96,6 +97,19 @@ enum MainMenu {
         menu.addItem(find)
 
         let root = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
+        root.submenu = menu
+        return root
+    }
+
+    private static func formatMenuItem() -> NSMenuItem {
+        let menu = NSMenu(title: "Format")
+        menu.addItem(item("Bold", #selector(DocumentViewController.toggleBold(_:)), "b"))
+        menu.addItem(item("Italic", #selector(DocumentViewController.toggleItalic(_:)), "i"))
+        menu.addItem(item("Strikethrough", #selector(DocumentViewController.toggleStrikethrough(_:)), "x",
+                          modifiers: [.command, .shift]))
+        menu.addItem(item("Code", #selector(DocumentViewController.toggleInlineCode(_:)), "e"))
+
+        let root = NSMenuItem(title: "Format", action: nil, keyEquivalent: "")
         root.submenu = menu
         return root
     }

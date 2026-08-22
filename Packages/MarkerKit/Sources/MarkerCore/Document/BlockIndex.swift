@@ -76,14 +76,14 @@ public struct BlockIndex: Sendable {
             guard offset >= start else { continue }
             let into = offset - start
             guard into <= run.renderLength else { return run.sourceRange.upperBound }
-            // A run's rendered text and its source bytes are the same length only
-            // when nothing was escaped or folded. Interpolate on the shorter of the
-            // two so an offset can never point outside the run's source.
-            let sourceLength = run.sourceRange.count
-            let scaled = run.renderLength == sourceLength
-                ? into
-                : min(into, sourceLength)
-            return run.sourceRange.lowerBound + scaled
+            // The two spaces count differently, so the offset is converted rather
+            // than carried across. Clamped to the run's source afterwards, because a
+            // run whose text was escaped or folded is shorter than its source and
+            // the converted offset would otherwise point past it.
+            guard let converted = OffsetConversion.utf8Offset(forUTF16: into, in: run.text) else {
+                return run.sourceRange.lowerBound
+            }
+            return run.sourceRange.lowerBound + min(converted, run.sourceRange.count)
         }
         return block.runs[0].sourceRange.lowerBound
     }
@@ -101,11 +101,10 @@ public struct BlockIndex: Sendable {
                 if offset < run.sourceRange.lowerBound { return entry.runStarts[position] }
                 if run.sourceRange.contains(offset) || run.sourceRange.upperBound == offset {
                     let into = offset - run.sourceRange.lowerBound
-                    let sourceLength = run.sourceRange.count
-                    let scaled = run.renderLength == sourceLength
-                        ? into
-                        : min(into, run.renderLength)
-                    return entry.runStarts[position] + scaled
+                    guard let converted = OffsetConversion.utf16Offset(forUTF8: into, in: run.text) else {
+                        return entry.runStarts[position]
+                    }
+                    return entry.runStarts[position] + min(converted, run.renderLength)
                 }
             }
             return entry.renderRange.upperBound

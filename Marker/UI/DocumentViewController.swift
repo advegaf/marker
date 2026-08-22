@@ -405,9 +405,17 @@ final class DocumentViewController: NSViewController {
             // can type into a specific construct rather than only at the end.
             let length = (self.textView.string as NSString).length
             let requested = ProcessInfo.processInfo.environment["MARKER_CARET"].flatMap(Int.init)
-            let end = NSRange(location: min(requested ?? length, length), length: 0)
+            let selectLength = ProcessInfo.processInfo.environment["MARKER_SELECT"].flatMap(Int.init) ?? 0
+            let end = NSRange(
+                location: min(requested ?? length, length),
+                length: min(selectLength, max(length - min(requested ?? length, length), 0))
+            )
             self.textView.setSelectedRange(end)
-            self.textView.insertText(text, replacementRange: end)
+            // An empty MARKER_TYPE means "select only". Inserting an empty string
+            // over a selection deletes it, which is not what a format probe wants.
+            if !text.isEmpty {
+                self.textView.insertText(text, replacementRange: end)
+            }
             // The source is the thing under test in the rendered path: the display
             // could look right while the file behind it is wrong.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
@@ -418,6 +426,23 @@ final class DocumentViewController: NSViewController {
 
             // `MARKER_PICK=1` then chooses the highlighted command, through the same
             // selector Return goes through, so the harness exercises the real path.
+            if let format = ProcessInfo.processInfo.environment["MARKER_FORMAT"] {
+                let styles: [String: InlineFormat.Style] = [
+                    "bold": .strong, "italic": .emphasis,
+                    "strike": .strikethrough, "code": .code,
+                ]
+                if let style = styles[format] {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        self.toggleFormat(style)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                            FileHandle.standardError.write(Data(
+                                "[source]\n\(self.document.source.text)\n[/source]\n".utf8
+                            ))
+                        }
+                    }
+                }
+                return
+            }
             guard ProcessInfo.processInfo.environment["MARKER_PICK"] != nil else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                 _ = self.slashMenu.handle(#selector(NSResponder.insertNewline(_:)))
@@ -558,6 +583,73 @@ final class DocumentViewController: NSViewController {
         textView.textStorage?.replaceCharacters(in: replaceRange, with: result.edit.replacement)
         textView.didChangeText()
         textView.setSelectedRange(NSRange(location: sourceToRenderOffset(result.caret), length: 0))
+    }
+
+    // MARK: Inline formatting
+
+    @objc func toggleBold(_ sender: Any?) { toggleFormat(.strong) }
+    @objc func toggleItalic(_ sender: Any?) { toggleFormat(.emphasis) }
+    @objc func toggleStrikethrough(_ sender: Any?) { toggleFormat(.strikethrough) }
+    @objc func toggleInlineCode(_ sender: Any?) { toggleFormat(.code) }
+
+    /// Applies a style to the selection, in either editing mode.
+    ///
+    /// The selection is a render range, so it is mapped to source bytes first. The
+    /// edit then goes to the source and the page is rebuilt from it, which is the
+    /// same path every other edit takes.
+    private func toggleFormat(_ style: InlineFormat.Style) {
+        guard editMode != .reading else { return }
+        let selection = textView.selectedRange()
+        guard selection.length > 0 else {
+            view.window?.subtitle = "Select some text first."
+            return
+        }
+
+        let source = editMode == .source ? MarkdownSource(textView.string) : document.source
+        let lower = renderToSourceOffset(selection.location)
+        let upper = renderToSourceOffset(selection.location + selection.length)
+        guard lower < upper else { return }
+
+        if ProcessInfo.processInfo.environment["MARKER_DEBUG_FORMAT"] != nil {
+            FileHandle.standardError.write(Data(
+                "[fmt] sel=\(selection) source=\(lower)..<\(upper) text=<<<\(source.slice(lower ..< upper) ?? "nil")>>>\n".utf8
+            ))
+        }
+        let blocks = MarkdownParser.parse(source).blocks
+        switch InlineFormat.toggle(style, over: lower ..< upper, in: source, blocks: blocks) {
+        case .success(let result):
+            var updated = source
+            for edit in result.edits { updated.apply(edit) }
+            document.replaceSource(with: updated.text)
+            render()
+            restoreSelection(result.selection)
+
+        case .failure(let refusal):
+            switch refusal {
+            case .emptySelection: view.window?.subtitle = "Select some text first."
+            case .crossesBlocks: view.window?.subtitle = "That selection spans two blocks."
+            case .notFormattable: view.window?.subtitle = "This block cannot carry inline styling."
+            }
+        }
+    }
+
+    private func restoreSelection(_ sourceRange: Range<Int>) {
+        let start = sourceToRenderOffset(sourceRange.lowerBound)
+        let end = sourceToRenderOffset(sourceRange.upperBound)
+        let length = (textView.string as NSString).length
+        guard start <= length, end <= length, start <= end else { return }
+        textView.setSelectedRange(NSRange(location: start, length: end - start))
+    }
+
+    /// Ticks the menu item when the selection already carries the style.
+    func isFormatActive(_ style: InlineFormat.Style) -> Bool {
+        let selection = textView.selectedRange()
+        guard selection.length > 0, editMode != .reading else { return false }
+        let source = editMode == .source ? MarkdownSource(textView.string) : document.source
+        let lower = renderToSourceOffset(selection.location)
+        let upper = renderToSourceOffset(selection.location + selection.length)
+        guard lower < upper else { return false }
+        return InlineFormat.isActive(style, over: lower ..< upper, blocks: MarkdownParser.parse(source).blocks)
     }
 
     // MARK: Find

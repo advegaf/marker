@@ -129,7 +129,7 @@ public enum EditMapper {
             // The two spaces count differently: rendered text is UTF-16, source is
             // UTF-8. An emoji is two units against four bytes, so carrying the offset
             // across unconverted lands mid-character and splits it.
-            guard let byteOffset = utf8Offset(forUTF16: into, in: run.text) else { return nil }
+            guard let byteOffset = OffsetConversion.utf8Offset(forUTF16: into, in: run.text) else { return nil }
 
             // Only safe when the run's text is literally its source bytes. An escape
             // or a folded newline means the two differ character by character, and
