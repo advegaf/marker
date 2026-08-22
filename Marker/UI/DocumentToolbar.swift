@@ -142,26 +142,15 @@ final class DocumentToolbar: NSObject, NSToolbarDelegate, NSMenuDelegate {
     func syncEditItem() {
         guard let editItem else { return }
         let editing = controller.editMode == .editing
-        let state = MarkerApp.license.state
 
         editItem.title = editing ? "Done" : "Edit"
         editItem.image = symbol(
             editing ? "checkmark" : "square.and.pencil",
             editing ? "Done" : "Edit"
         )
-        // A disabled button with no reason is the worst kind. The tooltip says what
-        // happened and what to do about it, and the button stays enabled so pressing
-        // it explains rather than doing nothing.
-        if editing {
-            editItem.toolTip = "Finish editing and render the document"
-        } else {
-            switch state {
-            case .pro(let name): editItem.toolTip = "Edit the markdown source. Licensed to \(name)"
-            case .trial(let days):
-                editItem.toolTip = "Edit the markdown source. \(days) day\(days == 1 ? "" : "s") left in your trial"
-            case .expired: editItem.toolTip = "Editing needs Marker Pro. Your trial has ended"
-            }
-        }
+        editItem.toolTip = editing
+            ? "Finish editing and render the document"
+            : "Edit the page in place. Saves clean Markdown to the same file"
     }
 
     private func symbol(_ name: String, _ description: String) -> NSImage? {

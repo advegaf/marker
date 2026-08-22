@@ -36,84 +36,6 @@ final class SettingsWindowController: NSWindowController {
     }
 }
 
-/// Licence state, and a field to enter a key.
-///
-/// Shown as one row rather than a separate window, because there is very little to
-/// say: what the state is, and where to type a key if it is not Pro.
-private struct LicenseRow: View {
-
-    @State private var state = MarkerApp.license.state
-    @State private var entry = ""
-    @State private var problem: String?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Label(title, systemImage: symbol)
-                    .foregroundStyle(state.allowsEditing ? .primary : .secondary)
-                Spacer()
-                if case .pro = state {
-                    Button("Remove") {
-                        MarkerApp.license.deactivate()
-                        state = MarkerApp.license.state
-                    }
-                }
-            }
-
-            if case .pro = state {} else {
-                HStack {
-                    // `prompt:` rather than the title argument: inside a Form, a
-                    // TextField's title becomes a row label to the left of the field,
-                    // which is not what placeholder text is for.
-                    TextField("", text: $entry, prompt: Text("Paste your licence key"))
-                        .labelsHidden()
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(.callout, design: .monospaced))
-                        .onSubmit { activate() }
-                    Button("Activate") { activate() }
-                        .disabled(entry.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
-                if let problem {
-                    Text(problem)
-                        .foregroundStyle(.red)
-                        .font(.callout)
-                }
-            }
-        }
-    }
-
-    private var title: String {
-        switch state {
-        case .pro(let name): return "Licensed to \(name)"
-        case .trial(let days): return "Trial, \(days) day\(days == 1 ? "" : "s") remaining"
-        case .expired: return "Trial ended. Marker is a viewer"
-        }
-    }
-
-    private var symbol: String {
-        switch state {
-        case .pro: return "checkmark.seal.fill"
-        case .trial: return "clock"
-        case .expired: return "lock"
-        }
-    }
-
-    private func activate() {
-        switch MarkerApp.license.activate(entry) {
-        case .success:
-            problem = nil
-            entry = ""
-            state = MarkerApp.license.state
-        case .failure(let failure):
-            // Distinguishing the two matters: one means retype it, the other means
-            // the key is not real.
-            problem = failure == .malformed
-                ? "That does not look like a licence key. Check for a missing character."
-                : "That key is not valid for this app."
-        }
-    }
-}
-
 private struct SettingsView: View {
 
     @State private var appearance = MarkerApp.appearance.appearance
@@ -139,12 +61,6 @@ private struct SettingsView: View {
                 Text("Liquid Glass makes the window translucent and follows your system setting. Dark and Light stay opaque.")
                     .foregroundStyle(.secondary)
                     .font(.callout)
-            }
-
-            Section {
-                LicenseRow()
-            } header: {
-                Text("Marker Pro")
             }
 
             Section {

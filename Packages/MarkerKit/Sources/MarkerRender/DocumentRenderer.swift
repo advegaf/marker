@@ -6,7 +6,7 @@ import MarkerCore
 /// `.image` instantiates zero `NSView`s, which is what makes Quick Look, PDF
 /// export and the offscreen screenshot harness work without fighting layer-backed
 /// capture. `.interactive` swaps tables for editable views and is only ever used
-/// by the Pro editor.
+/// by the document window.
 public enum RenderMode: Sendable {
     case image
     case interactive

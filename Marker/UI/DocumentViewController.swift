@@ -102,13 +102,11 @@ final class DocumentViewController: NSViewController {
         applyAppearance()
         // The harness needs to be able to open straight into edit mode, since the
         // EDT and TB rows are about what the window looks like in that state.
-        if MarkerApp.license.state.allowsEditing {
-            // Two flags, because the QA rows for the two editors are different.
-            if ProcessInfo.processInfo.environment["MARKER_SOURCE"] != nil {
-                editMode = .source
-            } else if ProcessInfo.processInfo.environment["MARKER_EDIT"] != nil {
-                editMode = .editing
-            }
+        // Two flags, because the QA rows for the two editors are different.
+        if ProcessInfo.processInfo.environment["MARKER_SOURCE"] != nil {
+            editMode = .source
+        } else if ProcessInfo.processInfo.environment["MARKER_EDIT"] != nil {
+            editMode = .editing
         }
         applyEditMode()
         typeFromLaunchEnvironmentIfNeeded()
@@ -317,30 +315,9 @@ final class DocumentViewController: NSViewController {
     // MARK: Edit mode
 
     func toggleEditMode() {
-        // Leaving edit mode is always allowed. Entering it is what Pro gates, so a
-        // trial that expires while a document is open never traps someone inside an
-        // editor they can no longer use.
-        if editMode == .reading, !MarkerApp.license.state.allowsEditing {
-            presentTrialEnded()
-            return
-        }
         editMode = editMode == .reading ? .editing : .reading
         applyEditMode()
         onEditModeChange?()
-    }
-
-    private func presentTrialEnded() {
-        let alert = NSAlert()
-        alert.messageText = "Your trial has ended"
-        alert.informativeText = """
-        Marker is a viewer without Pro. Reading, Mermaid, LaTeX, code and Quick Look         previews stay free forever. Enter a licence key in Settings to edit again.
-        """
-        alert.addButton(withTitle: "Open Settings")
-        alert.addButton(withTitle: "Not Now")
-        alert.alertStyle = .informational
-        if alert.runModal() == .alertFirstButtonReturn {
-            SettingsWindowController.shared.showWindow(nil)
-        }
     }
 
     private func applyEditMode() {
@@ -382,10 +359,6 @@ final class DocumentViewController: NSViewController {
 
     /// Toggles the raw markdown view, for anything the page cannot edit in place.
     @objc func toggleSourceMode(_ sender: Any?) {
-        guard MarkerApp.license.state.allowsEditing || editMode == .source else {
-            presentTrialEnded()
-            return
-        }
         editMode = editMode == .source ? .reading : .source
         applyEditMode()
         onEditModeChange?()

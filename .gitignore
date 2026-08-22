@@ -22,5 +22,7 @@ dist/
 # Scratch evidence from ad-hoc harness runs; real evidence is {ID}.png
 QA/evidence/_*.png
 
-# The licence signing key. Anyone holding this can mint licences.
-Scripts/.license-signing-key
+# Claude Code local state
+.agents/
+.claude/
+skills-lock.json
