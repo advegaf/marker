@@ -20,7 +20,7 @@ nonisolated final class MarkerDocument: NSDocument {
 
     /// How the file should be presented. Markdown renders; JSON and YAML are
     /// pretty-printed with syntax colours; anything else is plain text.
-    enum Presentation {
+    enum Presentation: Sendable {
         case markdown
         case json
         case yaml

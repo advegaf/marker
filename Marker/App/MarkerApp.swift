@@ -11,6 +11,11 @@ final class MarkerApp: NSObject, NSApplicationDelegate {
         MainMenu.install()
         Self.appearance.applyToApplication()
         openFileFromLaunchEnvironmentIfNeeded()
+        if ProcessInfo.processInfo.environment["MARKER_SETTINGS"] != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                SettingsWindowController.shared.showWindow(nil)
+            }
+        }
 
         if ProcessInfo.processInfo.environment["MARKER_DEBUG_WINDOWS"] != nil {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) {

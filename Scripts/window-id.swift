@@ -6,7 +6,10 @@
 import CoreGraphics
 import Foundation
 
-let owner = CommandLine.arguments.dropFirst().first ?? ""
+let arguments = Array(CommandLine.arguments.dropFirst())
+let owner = arguments.first ?? ""
+/// Optional second argument: only match windows whose title contains this.
+let titleFilter = arguments.count > 1 ? arguments[1] : nil
 guard !owner.isEmpty else {
     FileHandle.standardError.write(Data("usage: window-id.swift <process name>\n".utf8))
     exit(2)
@@ -22,6 +25,10 @@ let matches = windows.compactMap { info -> (Int, CGFloat)? in
           let width = bounds["Width"], let height = bounds["Height"],
           width > 200, height > 200
     else { return nil }
+    if let titleFilter {
+        let title = info[kCGWindowName as String] as? String ?? ""
+        guard title.localizedCaseInsensitiveContains(titleFilter) else { return nil }
+    }
     return (number, width * height)
 }.sorted { $0.1 > $1.1 }
 

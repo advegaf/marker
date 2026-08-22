@@ -122,12 +122,28 @@ public struct AttributedBuilder {
     }
 
     private func codeBlock(_ code: String, language: String?, block: BlockNode) -> NSMutableAttributedString {
-        NSMutableAttributedString(string: Self.lineFolded(code), attributes: [
+        let style = blockParagraphStyle(block, indent: theme.bodyPointSize)
+        let base: [NSAttributedString.Key: Any] = [
             .font: theme.monoFont(),
             .foregroundColor: theme.colors.text,
-            .paragraphStyle: blockParagraphStyle(block, indent: theme.bodyPointSize),
+            .paragraphStyle: style,
             .markerDecoration: MarkerDecoration.codeBlock,
-        ])
+        ]
+
+        let output = NSMutableAttributedString()
+        // Tokens carry their text rather than ranges into the source, so appending
+        // them in order cannot drift out of step with the code being highlighted.
+        for token in Highlighter.tokenize(code, language: language) {
+            var attributes = base
+            attributes[.foregroundColor] = theme.colors.syntax.color(
+                for: token.kind, plain: theme.colors.text
+            )
+            output.append(NSAttributedString(string: Self.lineFolded(token.text), attributes: attributes))
+        }
+        if output.length == 0 {
+            output.append(NSAttributedString(string: Self.lineFolded(code), attributes: base))
+        }
+        return output
     }
 
     private func thematicBreak(_ block: BlockNode) -> NSMutableAttributedString {
@@ -147,7 +163,13 @@ public struct AttributedBuilder {
         let output = NSMutableAttributedString()
         let style = blockParagraphStyle(block, indent: 0)
 
-        if let marker = listMarker(for: block) {
+        if let checked = block.context.checked, block.context.isListItemStart,
+           let checkbox = checkboxAttachment(checked: checked) {
+            let marker = NSMutableAttributedString(attributedString: checkbox)
+            marker.addAttribute(.paragraphStyle, value: style,
+                                range: NSRange(location: 0, length: marker.length))
+            output.append(marker)
+        } else if let marker = listMarker(for: block) {
             output.append(NSAttributedString(string: marker, attributes: [
                 .font: font,
                 .foregroundColor: theme.colors.secondaryText,
@@ -193,10 +215,49 @@ public struct AttributedBuilder {
         return output
     }
 
+    /// Task checkboxes are SF Symbols; bullets stay typographic.
+    ///
+    /// A bullet is punctuation set in the text font, so it tracks the baseline and
+    /// scales with zoom for free. A checkbox is a control glyph with no good
+    /// typographic equivalent, and the Unicode boxes render at wildly different
+    /// weights across faces, so those become real symbols.
+    private func checkboxAttachment(checked: Bool) -> NSAttributedString? {
+        let name = checked ? "checkmark.square.fill" : "square"
+        let configuration = NSImage.SymbolConfiguration(
+            pointSize: theme.bodyPointSize, weight: .regular
+        )
+        guard let image = NSImage(systemSymbolName: name, accessibilityDescription: checked ? "Checked" : "Unchecked")?
+            .withSymbolConfiguration(configuration) else { return nil }
+        image.isTemplate = true
+
+        let attachment = NSTextAttachment()
+        attachment.image = image
+        // Sit the symbol on the text baseline rather than the line box bottom, or it
+        // rides low next to the label and drifts further at every zoom step.
+        let font = theme.bodyFont()
+        let size = image.size
+        attachment.bounds = CGRect(
+            x: 0,
+            y: (font.capHeight - size.height) / 2,
+            width: size.width,
+            height: size.height
+        )
+        let text = NSMutableAttributedString(attachment: attachment)
+        text.addAttribute(
+            .foregroundColor,
+            value: checked ? theme.colors.text : theme.colors.secondaryText,
+            range: NSRange(location: 0, length: text.length)
+        )
+        text.append(NSAttributedString(string: "  "))
+        return text
+    }
+
     private func listMarker(for block: BlockNode) -> String? {
         guard block.context.isListItemStart else { return nil }
-        if let checked = block.context.checked {
-            return checked ? "\u{2611}  " : "\u{2610}  "
+        if block.context.checked != nil {
+            // Two characters: the attachment plus the gap, so the run offsets that
+            // BlockIndex computes from this length stay correct.
+            return "\u{FFFC}  "
         }
         if let ordinal = block.context.ordinal {
             return "\(ordinal).  "

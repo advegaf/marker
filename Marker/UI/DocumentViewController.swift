@@ -22,7 +22,7 @@ final class DocumentViewController: NSViewController {
     private let zoom = ZoomController()
 
     private var theme: MarkerTheme {
-        MarkerApp.appearance.theme(zoom: zoom.scale)
+        MarkerApp.appearance.theme(for: viewIfLoaded, zoom: zoom.scale)
     }
 
     init(document: MarkerDocument) {
@@ -54,6 +54,7 @@ final class DocumentViewController: NSViewController {
         scrollView.maxMagnification = 3.0
 
         view = scrollView
+        applyAppearance()
         // The harness needs to be able to open straight into edit mode, since the
         // EDT and TB rows are about what the window looks like in that state.
         if ProcessInfo.processInfo.environment["MARKER_EDIT"] != nil {
@@ -72,11 +73,24 @@ final class DocumentViewController: NSViewController {
             self, selector: #selector(appearanceDidChange),
             name: .markerAppearanceDidChange, object: nil
         )
+        textView.onEffectiveAppearanceChange = { [weak self] in self?.appearanceDidChange() }
     }
 
     @objc private func appearanceDidChange() {
-        scrollView.backgroundColor = theme.colors.background
+        let theme = self.theme
+        // The scroll view has to stop painting too, or an opaque band sits between
+        // the material and the text.
+        scrollView.drawsBackground = !theme.isTranslucent
+        scrollView.backgroundColor = theme.isTranslucent ? .clear : theme.colors.background
+        if let contentView = view.window?.contentView {
+            WindowMaterial.apply(theme, to: contentView)
+        }
         render()
+    }
+
+    /// Called once the view is in a window, when the material can be installed.
+    func applyAppearance() {
+        appearanceDidChange()
     }
 
     // MARK: Scrolling
@@ -141,9 +155,19 @@ final class DocumentViewController: NSViewController {
         let theme = self.theme
         let width = max(scrollView.contentSize.width, 320)
         let renderer = DocumentRenderer(theme: theme, mode: .interactive)
-        let content = editMode == .editing
-            ? renderer.renderPlain(document.source.text)
-            : renderer.render(document.source)
+        let content: NSAttributedString
+        if editMode == .editing {
+            // The source editor shows markdown the user is about to type into, so it
+            // is left uncoloured. Colouring it as code would misdescribe it.
+            content = renderer.renderPlain(document.source.text)
+        } else {
+            switch document.presentation {
+            case .markdown: content = renderer.render(document.source)
+            case .json: content = renderer.renderPlain(document.source.text, language: "json")
+            case .yaml: content = renderer.renderPlain(document.source.text, language: "yaml")
+            case .plainText: content = renderer.renderPlain(document.source.text)
+            }
+        }
         textView.setContent(content, theme: theme, availableWidth: width)
     }
 

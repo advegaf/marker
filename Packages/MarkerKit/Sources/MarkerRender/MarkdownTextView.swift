@@ -172,7 +172,7 @@ public final class MarkdownTextView: NSTextView {
     /// the last one, both of them scrolled short of the end of the document.
     public func setContent(_ attributed: NSAttributedString, theme: MarkerTheme, availableWidth: CGFloat) {
         currentTheme = theme
-        backgroundColor = theme.colors.background
+        applyBackground(theme)
         applyMeasure(theme: theme, availableWidth: availableWidth)
         textStorage?.setAttributedString(attributed)
         sizeToFitContent(theme: theme, availableWidth: availableWidth)
@@ -224,11 +224,33 @@ public final class MarkdownTextView: NSTextView {
     /// scroll position and the selection.
     public func apply(theme: MarkerTheme, availableWidth: CGFloat? = nil) {
         currentTheme = theme
-        backgroundColor = theme.colors.background
+        applyBackground(theme)
         let width = availableWidth ?? bounds.width
         applyMeasure(theme: theme, availableWidth: width)
         sizeToFitContent(theme: theme, availableWidth: width)
         needsDisplay = true
+    }
+
+    /// Translucency is a clear background colour, never `drawsBackground = false`.
+    ///
+    /// Code panels, quote bars and thematic rules are painted in
+    /// `drawBackground(in:)`, and NSTextView only calls that when it is drawing a
+    /// background. Turning it off would silently strip every decoration from the
+    /// page in glass mode, which looks like a rendering bug rather than a
+    /// configuration one.
+    private func applyBackground(_ theme: MarkerTheme) {
+        drawsBackground = true
+        backgroundColor = theme.isTranslucent ? .clear : theme.colors.background
+    }
+
+    /// The system flipping between light and dark has to re-render, because the
+    /// palette is concrete colour values chosen when the theme was built. Without
+    /// this, "Liquid Glass follows the system" would only be true at launch.
+    public var onEffectiveAppearanceChange: (() -> Void)?
+
+    public override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        onEffectiveAppearanceChange?()
     }
 
     /// The width the measure was last computed against, so a resize can tell a real

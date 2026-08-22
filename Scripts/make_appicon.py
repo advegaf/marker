@@ -1,41 +1,58 @@
 #!/usr/bin/env python3
-"""The Marker icon: a highlighter stroke laid across two lines of text.
+"""The Marker icon: a paragraph reduced to three strokes, one of them marked.
 
-Says "marker" literally and "reading" visually, and survives being shrunk to
-16pt in a Finder sidebar, which is where most icons turn to mush. Writes the
-1024 master plus the ten mac slots into AppIcon.appiconset, and a contact sheet
-so legibility at small sizes is checked by eye rather than assumed.
+Written to sit beside minus and wave rather than beside a stock app icon. The
+family rule those two share is monochrome, one reductive idea, sharp geometry,
+no decorative gradient and no skeuomorphism. minus carries its single accent as
+RGB dispersion at the edges of a bone bar; the same technique is used here on
+the middle stroke, so the highlighter reads as split light rather than as a
+coloured rectangle painted over text.
 
     python3 Scripts/make_appicon.py
 """
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
 import json
+import math
 import os
 
 S = 1024
 
-# macOS icon grid: the artwork is not system masked in the asset catalog path, so
-# it draws its own rounded square, inset from the canvas to leave room for the
-# shadow the grid expects.
-CONTENT = 824
+# macOS still ships app icons through the classic appiconset, confirmed by
+# /System/Applications carrying CFBundleIconName and an AppIcon.icns, so the
+# artwork is not system masked and draws its own rounded square. Wave fills
+# nearly the whole canvas, so this does too.
+CONTENT = 964
 INSET = (S - CONTENT) // 2
 
-INK_TOP = (28, 30, 36)
-INK_BOTTOM = (16, 17, 21)
-ACCENT = (255, 176, 46)
-ACCENT_DEEP = (243, 138, 22)
-TEXT_BRIGHT = (236, 238, 243)
-TEXT_DIM = (118, 124, 138)
+OBSIDIAN = (16, 16, 16)
+BONE = (255, 253, 249)
 
-SS = 4  # supersample factor, so every curve is resolved before downscaling
+# The dispersion triad, matched to minus/scripts/make_appicon.py.
+RED = (235, 45, 45)
+BLUE = (45, 125, 235)
+GREEN = (45, 225, 45)
+
+SS = 4  # supersample, so edges and the superellipse resolve before downscaling
+
+# Three strokes reading as a paragraph. Unequal lengths, the middle one longest
+# and marked, so the block is a paragraph rather than a pattern.
+#
+# Proportions are set by the 16pt case, not by how the 1024 master looks. At 16
+# pixels the whole block gets about 13 of them, so a stroke needs roughly an
+# eighth of the height and the gaps need to be wider than the strokes or the
+# three merge into a grey smear. Everything larger then takes care of itself.
+BAR_HEIGHT = 0.115
+BAR_GAP = 0.200
+BAR_LEFT = 0.170
+BAR_WIDTHS = (0.540, 0.660, 0.400)
+BLOCK_TOP = 0.243
 
 
-def squircle(size, radius_ratio=0.235, samples=2048):
-    """A superellipse mask, which is the shape macOS actually uses.
+def squircle_mask(size, samples=2048):
+    """A superellipse, which is the curve macOS actually uses.
 
-    A plain rounded rectangle reads subtly wrong next to system icons: the
-    curvature jumps where the arc meets the straight edge instead of easing into
-    it. The exponent here is the standard continuous-corner approximation.
+    A plain rounded rectangle reads subtly wrong beside system icons: curvature
+    jumps where the arc meets the straight edge instead of easing into it.
     """
     mask = Image.new("L", (size, size), 0)
     draw = ImageDraw.Draw(mask)
@@ -43,8 +60,7 @@ def squircle(size, radius_ratio=0.235, samples=2048):
     half = size / 2.0
     points = []
     for i in range(samples + 1):
-        t = i / samples * 2 * 3.141592653589793
-        import math
+        t = i / samples * 2 * math.pi
         cos_t, sin_t = math.cos(t), math.sin(t)
         x = half * (abs(cos_t) ** (2 / n)) * (1 if cos_t >= 0 else -1)
         y = half * (abs(sin_t) ** (2 / n)) * (1 if sin_t >= 0 else -1)
@@ -53,93 +69,51 @@ def squircle(size, radius_ratio=0.235, samples=2048):
     return mask
 
 
-def vertical_gradient(size, top, bottom):
-    grad = Image.new("RGB", (1, size))
-    for y in range(size):
-        t = y / max(size - 1, 1)
-        grad.putpixel((0, y), tuple(
-            int(round(top[c] + (bottom[c] - top[c]) * t)) for c in range(3)
-        ))
-    return grad.resize((size, size), Image.BILINEAR)
+def bar_rect(big, index):
+    height = int(big * BAR_HEIGHT)
+    y = int(big * BLOCK_TOP) + index * int(big * BAR_GAP)
+    x = int(big * BAR_LEFT)
+    width = int(big * BAR_WIDTHS[index])
+    return [x, y, x + width, y + height]
 
 
-def rounded_bar(draw, x, y, w, h, fill):
-    draw.rounded_rectangle([x, y, x + w, y + h], radius=h / 2, fill=fill)
+def clone(big, index, colour, dx, dy):
+    """One offset colour copy of the marked bar, for additive dispersion."""
+    layer = Image.new("RGB", (big, big), (0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    left, top, right, bottom = bar_rect(big, index)
+    draw.rectangle([left + dx, top + dy, right + dx, bottom + dy], fill=colour)
+    return layer
 
 
 def build_master():
     big = CONTENT * SS
+    art = Image.new("RGB", (big, big), OBSIDIAN)
 
-    # Ground.
-    ground = vertical_gradient(big, INK_TOP, INK_BOTTOM)
+    # The marked stroke: additive RGB copies, offset and softened so they read as
+    # dispersion rather than as misregistration, then the bone bar laid on top so
+    # the copies survive only at the fringes.
+    glow = Image.new("RGB", (big, big), (0, 0, 0))
+    spread = int(big * 0.009)
+    glow = ImageChops.add(glow, clone(big, 1, RED, -spread, -int(spread * 0.75)))
+    glow = ImageChops.add(glow, clone(big, 1, BLUE, spread, int(spread * 0.75)))
+    glow = ImageChops.add(glow, clone(big, 1, GREEN, 0, int(spread * 1.1)))
+    glow = glow.filter(ImageFilter.GaussianBlur(big * 0.005))
+    art = ImageChops.add(art, glow)
 
-    # Text lines. Three of them, the middle one longest, so the block reads as a
-    # paragraph rather than as an abstract pattern. The middle line is drawn again
-    # after the slab, because a highlighter you cannot read through is just a bar.
-    lines = Image.new("RGBA", (big, big), (0, 0, 0, 0))
-    ld = ImageDraw.Draw(lines)
-    bar_h = int(big * 0.072)
-    gap = int(big * 0.118)
-    left = int(big * 0.185)
-    widths = [0.560, 0.630, 0.395]
-    top = int(big * 0.305)
-    for index, ratio in enumerate(widths):
-        if index == 1:
-            continue
-        rounded_bar(ld, left, top + index * gap, int(big * ratio), bar_h, TEXT_DIM + (255,))
-    ground = Image.alpha_composite(ground.convert("RGBA"), lines)
+    draw = ImageDraw.Draw(art)
+    # Sharp corners. minus and wave both cut their forms square; a rounded bar
+    # here would soften the one thing the icon is made of.
+    for index in range(3):
+        draw.rectangle(bar_rect(big, index), fill=BONE)
 
-    # The highlighter slab, angled very slightly the way a hand draws it, with a
-    # soft leading edge so it reads as wet ink rather than as a pasted rectangle.
-    slab = Image.new("RGBA", (big, big), (0, 0, 0, 0))
-    sd = ImageDraw.Draw(slab)
-    slab_h = int(big * 0.175)
-    slab_y = top + gap - int(slab_h * 0.30)
-    # Held inside the squircle rather than bled to its edge: a stroke that runs off
-    # both sides reads as a clipped rectangle, not as something someone drew.
-    slab_left, slab_right = int(big * 0.115), int(big * 0.885)
-    sd.polygon(
-        [
-            (slab_left, slab_y + int(big * 0.012)),
-            (slab_right, slab_y - int(big * 0.012)),
-            (slab_right, slab_y + slab_h - int(big * 0.012)),
-            (slab_left, slab_y + slab_h + int(big * 0.012)),
-        ],
-        fill=ACCENT + (238,),
-    )
-    # A denser core, offset down, the way a chisel tip leaves more pigment on the
-    # trailing edge of a stroke.
-    sd.polygon(
-        [
-            (slab_left, slab_y + int(slab_h * 0.55)),
-            (slab_right, slab_y + int(slab_h * 0.30)),
-            (slab_right, slab_y + slab_h - int(big * 0.012)),
-            (slab_left, slab_y + slab_h + int(big * 0.012)),
-        ],
-        fill=ACCENT_DEEP + (130,),
-    )
-    slab = slab.filter(ImageFilter.GaussianBlur(big * 0.004))
-    art = Image.alpha_composite(ground, slab)
-
-    # The highlighted line, on top of the ink in the ground colour, so it reads as
-    # text seen through the highlighter. At 16pt this is the whole mark: an amber
-    # bar with a dark line running through it.
-    over = Image.new("RGBA", (big, big), (0, 0, 0, 0))
-    od = ImageDraw.Draw(over)
-    rounded_bar(od, left, top + gap, int(big * widths[1]), bar_h, (18, 19, 24, 236))
-    art = Image.alpha_composite(art, over)
-
-    # Mask to the squircle.
-    mask = squircle(big)
-    art.putalpha(mask)
+    art = art.convert("RGBA")
+    art.putalpha(squircle_mask(big))
     art = art.resize((CONTENT, CONTENT), Image.LANCZOS)
 
-    # Canvas, with the soft contact shadow the macOS grid leaves room for.
+    # No drop shadow. minus has none, wave has none, and a shadow is exactly the
+    # decoration the family rule excludes.
     canvas = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-    shadow = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-    shadow.paste((0, 0, 0, 78), (INSET, INSET + int(S * 0.010)), art.split()[3])
-    shadow = shadow.filter(ImageFilter.GaussianBlur(S * 0.014))
-    canvas = Image.alpha_composite(canvas, shadow)
     canvas.paste(art, (INSET, INSET), art)
     return canvas
 
@@ -171,7 +145,7 @@ def main():
     with open(os.path.join(out, "Contents.json"), "w") as handle:
         json.dump({"images": images, "info": {"author": "xcode", "version": 1}}, handle, indent=2)
 
-    # Contact sheet: every slot at its real pixel size on a neutral ground, so the
+    # Contact sheet on a neutral ground, every slot at its real pixel size, so the
     # 16pt case is judged rather than hoped for.
     sheet_w, sheet_h = 900, 220
     sheet = Image.new("RGB", (sheet_w, sheet_h), (238, 239, 242))

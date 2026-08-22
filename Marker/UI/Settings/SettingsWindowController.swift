@@ -1,94 +1,97 @@
 import AppKit
+import SwiftUI
 import MarkerRender
 
-/// Settings. Small on purpose: an appearance picker, the two network switches the
-/// privacy claim rests on, and nothing else until a feature needs a knob.
+/// Settings, hosted from SwiftUI.
+///
+/// The previous version was a bare `NSStackView` with no constraints: the label
+/// clipped, the segmented control overflowed the window, nothing was grouped. A
+/// grouped `Form` is the system component for exactly this, and it brings correct
+/// insets, control sizing, label alignment, section footers and Liquid Glass
+/// without any of them being specified here.
 final class SettingsWindowController: NSWindowController {
 
     static let shared = SettingsWindowController()
 
     private init() {
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 420, height: 220),
-            styleMask: [.titled, .closable],
-            backing: .buffered,
-            defer: false
-        )
+        let hosting = NSHostingController(rootView: SettingsView())
+        let window = NSWindow(contentViewController: hosting)
         window.title = "Settings"
+        window.styleMask = [.titled, .closable]
+        window.isRestorable = false
+        // Sized from what the form actually needs, so it can never clip again.
+        window.setContentSize(hosting.view.fittingSize)
+        window.contentMinSize = hosting.view.fittingSize
         window.center()
         super.init(window: window)
-        window.contentViewController = SettingsViewController()
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("unavailable") }
+
+    override func showWindow(_ sender: Any?) {
+        super.showWindow(sender)
+        window?.makeKeyAndOrderFront(sender)
+        NSApp.activate(ignoringOtherApps: true)
+    }
 }
 
-final class SettingsViewController: NSViewController {
+private struct SettingsView: View {
 
-    private let appearancePicker = NSSegmentedControl(
-        labels: ["Liquid Glass", "Dark", "Light"],
-        trackingMode: .selectOne,
-        target: nil,
-        action: nil
-    )
-    private let updateCheckToggle = NSButton(checkboxWithTitle: "Check for updates", target: nil, action: nil)
-    private let remoteImagesToggle = NSButton(checkboxWithTitle: "Load images linked from the web", target: nil, action: nil)
+    @State private var appearance = MarkerApp.appearance.appearance
+    @AppStorage(Preferences.updateKey) private var checksForUpdates = true
+    @AppStorage(Preferences.remoteImagesKey) private var loadsRemoteImages = true
 
-    override func loadView() {
-        let stack = NSStackView(views: [
-            labelled("Appearance", appearancePicker),
-            updateCheckToggle,
-            remoteImagesToggle,
-        ])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 16
-        stack.edgeInsets = NSEdgeInsets(top: 24, left: 24, bottom: 24, right: 24)
-        view = stack
+    var body: some View {
+        Form {
+            Section {
+                // Label hidden: the section header already says Appearance, and
+                // repeating it in the row is the kind of thing that reads as
+                // machine generated.
+                Picker("Appearance", selection: $appearance) {
+                    ForEach(MarkerTheme.Appearance.allCases, id: \.self) { option in
+                        Text(option.displayName).tag(option)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            } header: {
+                Text("Appearance")
+            } footer: {
+                Text("Liquid Glass makes the window translucent and follows your system setting. Dark and Light stay opaque.")
+                    .foregroundStyle(.secondary)
+                    .font(.callout)
+            }
 
-        appearancePicker.target = self
-        appearancePicker.action = #selector(appearanceChanged)
-        appearancePicker.selectedSegment = MarkerTheme.Appearance.allCases
-            .firstIndex(of: MarkerApp.appearance.appearance) ?? 0
-
-        updateCheckToggle.target = self
-        updateCheckToggle.action = #selector(updateCheckChanged)
-        updateCheckToggle.state = Preferences.updateCheckEnabled ? .on : .off
-
-        remoteImagesToggle.target = self
-        remoteImagesToggle.action = #selector(remoteImagesChanged)
-        remoteImagesToggle.state = Preferences.remoteImagesEnabled ? .on : .off
-    }
-
-    private func labelled(_ title: String, _ control: NSView) -> NSView {
-        let label = NSTextField(labelWithString: title)
-        let row = NSStackView(views: [label, control])
-        row.orientation = .horizontal
-        row.spacing = 12
-        return row
-    }
-
-    @objc private func appearanceChanged() {
-        let choices = MarkerTheme.Appearance.allCases
-        guard choices.indices.contains(appearancePicker.selectedSegment) else { return }
-        MarkerApp.appearance.set(choices[appearancePicker.selectedSegment])
-    }
-
-    @objc private func updateCheckChanged() {
-        Preferences.updateCheckEnabled = updateCheckToggle.state == .on
-    }
-
-    @objc private func remoteImagesChanged() {
-        Preferences.remoteImagesEnabled = remoteImagesToggle.state == .on
+            Section {
+                Toggle("Check for updates", isOn: $checksForUpdates)
+                Toggle("Load images linked from the web", isOn: $loadsRemoteImages)
+            } header: {
+                Text("Privacy")
+            } footer: {
+                Text("Marker sends nothing about you or your files. Turning off remote images keeps a document from reaching the network at all.")
+                    .foregroundStyle(.secondary)
+                    .font(.callout)
+            }
+        }
+        .formStyle(.grouped)
+        .frame(width: 460)
+        .fixedSize(horizontal: false, vertical: true)
+        .onChange(of: appearance) { _, new in
+            MarkerApp.appearance.set(new)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .markerAppearanceDidChange)) { _ in
+            // Keeps the picker honest when the theme is changed from the toolbar.
+            appearance = MarkerApp.appearance.appearance
+        }
     }
 }
 
 /// The two switches behind the product's privacy claim, in one place so a guard
 /// test can point at them and the QA rows can flip them.
 enum Preferences {
-    private static let updateKey = "MarkerUpdateCheckEnabled"
-    private static let remoteImagesKey = "MarkerRemoteImagesEnabled"
+    static let updateKey = "MarkerUpdateCheckEnabled"
+    static let remoteImagesKey = "MarkerRemoteImagesEnabled"
 
     static var updateCheckEnabled: Bool {
         get { UserDefaults.standard.object(forKey: updateKey) as? Bool ?? true }

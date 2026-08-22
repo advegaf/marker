@@ -6,7 +6,7 @@ import MarkerRender
 /// Everything here is a second route to something that already works from the
 /// keyboard, which is the point: the shortcuts stay authoritative and the toolbar
 /// makes them discoverable. Nothing in here owns state.
-final class DocumentToolbar: NSObject, NSToolbarDelegate {
+final class DocumentToolbar: NSObject, NSToolbarDelegate, NSMenuDelegate {
 
     private enum ItemID {
         static let textSize = NSToolbarItem.Identifier("marker.textSize")
@@ -82,6 +82,10 @@ final class DocumentToolbar: NSObject, NSToolbarDelegate {
 
     private func themeItem() -> NSToolbarItem {
         let menu = NSMenu()
+        // The delegate refreshes the checkmarks every time the menu opens. Setting
+        // state once here is what left the tick sitting on Liquid Glass after
+        // switching to Dark: the menu was built at launch and never revisited.
+        menu.delegate = self
         for (index, appearance) in MarkerTheme.Appearance.allCases.enumerated() {
             let item = NSMenuItem(
                 title: appearance.displayName,
@@ -90,7 +94,6 @@ final class DocumentToolbar: NSObject, NSToolbarDelegate {
             )
             item.target = self
             item.tag = index
-            item.state = appearance == MarkerApp.appearance.appearance ? .on : .off
             menu.addItem(item)
         }
 
@@ -146,6 +149,16 @@ final class DocumentToolbar: NSObject, NSToolbarDelegate {
 
     private func symbol(_ name: String, _ description: String) -> NSImage? {
         NSImage(systemSymbolName: name, accessibilityDescription: description)
+    }
+
+    // MARK: Menu
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        let current = MarkerApp.appearance.appearance
+        let choices = MarkerTheme.Appearance.allCases
+        for item in menu.items where choices.indices.contains(item.tag) {
+            item.state = choices[item.tag] == current ? .on : .off
+        }
     }
 
     // MARK: Actions
