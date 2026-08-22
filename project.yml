@@ -1,0 +1,107 @@
+name: Marker
+options:
+  bundleIdPrefix: com.advegaf
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MACOSX_DEPLOYMENT_TARGET: "26.0"
+    # New code on Swift 6.3, so the iOS projects' setting applies rather than
+    # Wave's `minimal`. Wave only needs minimal because WhisperKit and MLX drag
+    # in non-Sendable ML types; nothing here does.
+    SWIFT_STRICT_CONCURRENCY: complete
+    SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
+    SWIFT_APPROACHABLE_CONCURRENCY: YES
+    DEAD_CODE_STRIPPING: YES
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    # Ad-hoc signed for local development, the way Wave signs its release DMG.
+    # No provisioning profile to fetch, no team to configure, and it still
+    # registers the Quick Look extension with LaunchServices. Swap to a real
+    # identity only when notarising a distributable build.
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "-"
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGNING_ALLOWED: YES
+    CODE_SIGNING_REQUIRED: YES
+
+packages:
+  # swift-markdown and SwiftMath are declared inside MarkerKit's own Package.swift.
+  # Transitive deps belong to the package that uses them, so the app's dependency
+  # list stays one line.
+  MarkerKit:
+    path: Packages/MarkerKit
+
+targets:
+  Marker:
+    type: application
+    platform: macOS
+    sources:
+      - Marker
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.advegaf.Marker
+        PRODUCT_NAME: Marker
+        INFOPLIST_FILE: Marker/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Marker/Marker.entitlements
+        ENABLE_APP_SANDBOX: false
+        ENABLE_HARDENED_RUNTIME: true
+        COMBINE_HIDPI_IMAGES: true
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
+    dependencies:
+      - package: MarkerKit
+        product: MarkerCore
+      - package: MarkerKit
+        product: MarkerRender
+      - target: MarkerQuickLook
+        embed: true
+
+  MarkerQuickLook:
+    type: app-extension
+    platform: macOS
+    sources:
+      - MarkerQuickLook
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.advegaf.Marker.QuickLook
+        PRODUCT_NAME: MarkerQuickLook
+        INFOPLIST_FILE: MarkerQuickLook/Info.plist
+        CODE_SIGN_ENTITLEMENTS: MarkerQuickLook/MarkerQuickLook.entitlements
+        ENABLE_APP_SANDBOX: true
+        ENABLE_HARDENED_RUNTIME: true
+        SKIP_INSTALL: YES
+    dependencies:
+      - package: MarkerKit
+        product: MarkerCore
+      - package: MarkerKit
+        product: MarkerRender
+
+  MarkerTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - MarkerTests
+    settings:
+      base:
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Marker.app/Contents/MacOS/Marker"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - target: Marker
+
+schemes:
+  Marker:
+    build:
+      targets:
+        Marker: all
+        MarkerQuickLook: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - MarkerTests

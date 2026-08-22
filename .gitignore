@@ -1,0 +1,23 @@
+# Xcode project is generated from project.yml by xcodegen.
+Marker.xcodeproj/
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+
+# SwiftPM
+.build/
+.swiftpm/
+Packages/MarkerKit/.build/
+
+# macOS
+.DS_Store
+Icon?
+Icon
+
+# Release artifacts
+dist/
+*.dmg
+
+# Scratch evidence from ad-hoc harness runs; real evidence is {ID}.png
+QA/evidence/_*.png
