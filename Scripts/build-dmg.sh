@@ -253,12 +253,26 @@ echo "==> verify"
 MOUNT=$(hdiutil attach "$DMG" -nobrowse -readonly | awk -F'\t' '/\/Volumes\//{print $NF}' | tail -1)
 trap 'hdiutil detach "$MOUNT" -quiet 2>/dev/null || true' EXIT
 
-# The real gate. Gatekeeper is what a downloader actually meets, and it is the
-# only check that tells notarised apart from merely signed.
+# Gatekeeper is what a downloader actually meets, and it is the only check that
+# tells notarised apart from merely signed.
+#
+# spctl exits 3 on "rejected", and under `set -euo pipefail` that killed the whole
+# script here, silently: the DMG was already built so the run looked fine, but the
+# size line and the final path never printed and the exit code was 3. It would have
+# healed itself the moment notarisation started working, which is the worst kind of
+# bug to leave in a release script.
+#
+# So: informational when we did not notarise, a hard gate when we did.
+set +e
 spctl -a -vv "$MOUNT/Marker.app" 2>&1 | sed 's/^/    /'
+GATE=${PIPESTATUS[0]}
+set -e
 
 if [ "$NOTARIZE" -eq 1 ]; then
+  [ "$GATE" -eq 0 ] || { echo "Gatekeeper rejected a notarised build" >&2; exit 1; }
   xcrun stapler validate "$DMG" 2>&1 | sed 's/^/    /'
+elif [ "$GATE" -ne 0 ]; then
+  echo "    (unnotarised, so Gatekeeper rejects it. Run with --notarize for a release.)"
 fi
 
 echo "    size: $(du -h "$DMG" | cut -f1)"
