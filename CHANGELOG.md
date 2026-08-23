@@ -1,5 +1,8 @@
 # Changelog
 
+Versions below 1.0.4 were development milestones. 1.0.4 is the first public
+release, so everything under it is what is in that build.
+
 ## 1.0.4
 
 - A narrow table column was squeezed until its words broke in half. `MarkerRender`

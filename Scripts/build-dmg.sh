@@ -52,6 +52,7 @@ xcodebuild -project Marker.xcodeproj -scheme Marker -configuration Release \
   DEVELOPMENT_TEAM="$TEAM" \
   CODE_SIGN_IDENTITY="$IDENTITY" \
   OTHER_CODE_SIGN_FLAGS="--timestamp" \
+  CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO \
   build | tail -3
 
 BUILT=$(xcodebuild -project Marker.xcodeproj -scheme Marker -configuration Release \
@@ -70,6 +71,21 @@ fi
 echo "==> signature"
 codesign --verify --deep --strict --verbose=1 "$APP" 2>&1 | tail -2
 codesign -dv --verbose=2 "$APP" 2>&1 | grep -E "Authority|Timestamp|flags" | head -3
+
+# get-task-allow lets any process attach a debugger to the shipped app, and Apple
+# rejects a Developer ID notarisation that carries it. Xcode injects it whenever
+# the build has no distribution provisioning profile, which is every build here,
+# so CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO above turns that off.
+#
+# Checked rather than trusted: this is invisible until a notarisation bounces, and
+# the bounce arrives minutes later in a log nobody reads twice.
+for target in "$APP" "$APP/Contents/PlugIns/MarkerQuickLook.appex"; do
+  if codesign -d --entitlements :- "$target" 2>/dev/null | grep -q "get-task-allow"; then
+    echo "get-task-allow is present in $(basename "$target"); notarisation would reject it" >&2
+    exit 1
+  fi
+done
+echo "    no get-task-allow in the app or the extension"
 
 # ------------------------------------------------------------ volume icon
 # Built from the app icon's own slots rather than a separate asset, so the disk
