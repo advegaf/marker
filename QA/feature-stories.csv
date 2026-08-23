@@ -1,0 +1,143 @@
+ID,Area,User story,Expected behavior (from code),Status,Evidence,Notes
+APP-1,App shell,I open a .md file from Finder and it opens in Marker,Info.plist CFBundleDocumentTypes claims net.daringfireball.markdown with LSHandlerRank Owner; NSDocumentClass MarkerDocument,Pass (tests),AppBundleTests,
+APP-2,App shell,I open .markdown .mdown .mkd .mkdn and they open too,UTImportedTypeDeclarations lists all five extensions under public.filename-extension,Pass (tests),AppBundleTests,
+APP-3,App shell,"I open a .txt, .json or .yaml and Marker still shows it","Second CFBundleDocumentTypes entry claims public.plain-text, public.json, public.yaml at LSHandlerRank Alternate",Pass (tests),AppBundleTests,
+APP-4,App shell,Launching with no document offers me a file to open,"applicationShouldOpenUntitledFile returns true, applicationOpenUntitledFile calls NSDocumentController.openDocument(nil)",Pass,,open panel appears for a returning user via LaunchServices
+APP-5,App shell,The window opens at a usable size and remembers where I left it,"DocumentWindowController contentRect 900x700, contentMinSize 420x320, setFrameAutosaveName MarkerDocumentWindow",Pass (code),,
+APP-6,App shell,A long document scrolls all the way to its last line,MarkdownTextView.isVerticallyResizable false and sizeToFitContent enumerates every fragment with .ensuresLayout; frame height >= usageBounds height,Pass (tests),ScrollSizingTests,
+APP-7,App shell,Resizing the window keeps the text column centred,viewDidLayout re-runs apply(theme:availableWidth:) when the width changes by more than 0.5pt,Pass (code),,
+APP-8,App shell,Closing the last window does not quit the app,applicationShouldTerminateAfterLastWindowClosed returns false,Pass (code),,
+APP-9,App shell,The title bar shows the file name and does not collide with the text,"styleMask includes fullSizeContentView, toolbarStyle unified, titleVisibility visible",Pass (code),,
+APP-10,App shell,Opening a second document gives it its own window,shouldCascadeWindows true; NSDocument one window controller per document,Pass (code),,
+APP-11,App shell,A Help menu exists and can reopen the walkthrough,MainMenu.helpMenuItem installs Welcome to Marker wired to MarkerApp.showWelcome,Pass,,Help menu installed
+WEL-1,Walkthrough,On first launch I get a welcome window explaining the app,WelcomeWindowController.shouldShowAtLaunch true when MarkerHasSeenWelcome is unset,Pass,WEL-1.png,
+WEL-2,Walkthrough,On the second launch it does not appear again,applicationDidFinishLaunching sets Preferences.hasSeenWelcome true before showing,Pass,,second launch shows the open panel and no welcome window
+WEL-3,Walkthrough,The launch open panel does not cover the welcome window,applicationShouldOpenUntitledFile returns false when presentedWelcome or shouldShowAtLaunch,Pass,,"was Fail, see defects.md D-2"
+WEL-4,Walkthrough,The four rows settle in rather than appearing all at once,rows animate opacity plus 8pt rise on MarkerMotion.micro delayed by index times MarkerMotion.stagger,Pass (code),,
+WEL-5,Walkthrough,"With Reduce Motion on, nothing slides",MarkerMotion.settle returns easeInOut 0.2 with no travel when accessibilityReduceMotion,Pass (code),,
+WEL-6,Walkthrough,The button opens a real document I can read and edit,WelcomeDocument.open copies the bundled template to Application Support then opens the copy,Pass (tests),WelcomeTests,
+WEL-7,Walkthrough,Editing that document and saving works,the opened copy lives outside the app bundle so it is writable and saving cannot break the signature,Pass (tests),WelcomeTests,the copy is outside the bundle and writable
+WEL-8,Walkthrough,Reopening it from Help keeps my edits,materialize returns the existing file untouched when it is already there,Pass (tests),WelcomeTests,a second call leaves an edited copy alone
+WEL-9,Walkthrough,The walkthrough never appears in a screenshot run,"shouldShowAtLaunch returns false when Harness.isActive, which any MARKER_ variable sets",Pass,,"MARKER_SNAPSHOT run captured the document, defaults untouched"
+WEL-10,Walkthrough,The copy carries no em or en dashes,WelcomeTests.testTheCopyCarriesNoDashes scans the bundled document,Pass (tests),WelcomeTests,
+REN-1,Rendering,Headings render at descending sizes,AttributedBuilder applies theme.metrics heading scale per level,Pass,REN-1.png,
+REN-2,Rendering,"Bold, italic, both, strikethrough and inline code all render distinctly","InlineStyle emphasis, strong, strikethrough, code each map to a distinct attribute run",Pass (code),,
+REN-3,Rendering,Bullet lists show typographic bullets and nest,"list bullets are text glyphs, deliberately not SF Symbols, so they scale with zoom",Pass (code),,
+REN-4,Rendering,Numbered lists show their ordinals,ordinals are synthetic text and EditMapper refuses edits over them,Pass (code),,
+REN-5,Rendering,Task lists show real checkbox symbols on the baseline,NSImage(systemSymbolName: square / checkmark.square.fill) in an NSTextAttachment with a baseline offset,Pass (code),,
+REN-6,Rendering,Block quotes get a bar down the left,MarkdownTextView.drawBackground paints the quote bar; requires drawsBackground true,Pass (code),,
+REN-7,Rendering,Thematic breaks render as a hairline,drawBackground paints the rule at theme.colors.rule,Pass (code),,
+REN-8,Rendering,Links are coloured and carry their destination,InlineRun.linkURL holds the destination; the run range covers the display text only,Pass (code),,
+REN-9,Rendering,Text is set to a readable measure rather than full bleed,apply(theme:availableWidth:) caps the column at theme.metrics.contentWidth and centres it,Pass (code),,
+REN-10,Rendering,A paragraph containing an apostrophe renders as a paragraph,MarkdownParser passes .disableSmartOpts so the node literal matches the source slice,Pass,REN-10-fixed.png,"was Fail, see defects.md D-1"
+REN-11,Rendering,"Straight quotes, double hyphens and ellipses are shown as typed","SmartPunctuationTests asserts no curly quote, en dash, em dash or ellipsis character appears",Pass (tests),SmartPunctuationTests,
+REN-12,Rendering,A footnote reference renders as something sensible,"cmark-gfm footnote extension is not enabled, so [^1] passes through as literal text",Fail,,"see defects.md D-3, footnotes render as literal text"
+REN-13,Rendering,Raw HTML in a document does not break the page,html blocks lower to an opaque block that renders its source rather than executing anything,Pass (code),,
+REN-14,Rendering,Every run maps back to the bytes that produced it,SourceMapTests asserts SourceVerifier.produces for every non synthetic run in the corpus,Pass (tests),SourceMapTests,
+CODE-1,Code,A fenced block gets a panel behind it,drawBackground paints codeBackground with codeCornerRadius,Pass (code),,
+CODE-2,Code,A fenced block is not double spaced,intra block newlines fold to U+2028 because paragraphSpacing fires at every \n,Pass (code),,
+CODE-3,Code,"Swift, JavaScript, Python, Rust, Go, C, Java, Ruby, shell, SQL, CSS, markup, YAML and JSON all highlight",Languages.all holds fourteen LanguageRule tables; HighlighterTests round trips each sample,Pass,CODE-3.png,
+CODE-4,Code,An unknown language hint still renders as a code block,Highlighter falls back to no tokens rather than failing,Pass (code),,
+CODE-5,Code,A JSON file opens pretty printed with key order preserved,JSONPrettyPrinter changes whitespace only; JSONPrettyPrinterTests asserts key order,Pass (tests),JSONPrettyPrinterTests,
+CODE-6,Code,No JavaScript engine is linked into the app,"GuardTests fails on WKWebView, WebKit or JavaScriptCore anywhere under the app or extension",Pass (tests),GuardTests,"no WKWebView, WebKit or JavaScriptCore anywhere"
+TBL-1,Tables,A GFM table renders as a table,"ASTLowering builds TableModel, AttributedBuilder renders it through TableLayout as an image attachment",Pass,TBL-1.png,
+TBL-2,Tables,Column alignment is honoured,TableModel reads the delimiter row for :--- :---: ---:,Pass (tests),SourceMapTests,
+TBL-3,Tables,A table that cannot be laid out still shows its content,AttributedBuilder falls back to TableMarkdownWriter.markdown(for:) rendered as a code block,Pass (tests),TableWidthTests,falls back rather than failing
+TBL-4,Tables,Editing a table cell in place,not built; tables render as images and are edited through the Markdown source view,Not built,,tables render as images; edited through the Markdown source view
+MTH-1,Math,Inline $...$ typesets in the line,InlineMathSplitter splits inline math; MathRenderer draws it through MTMathImage,Pass (code),,
+MTH-2,Math,Display $$...$$ typesets centred on its own line,display math lowers to its own block with a centred attachment,Pass,MTH-2.png,
+MTH-3,Math,A dollar sign in prose is not treated as math,InlineMathSplitter requires a closing delimiter on the same line; InlineMathTests covers prices,Pass (tests),InlineMathTests,
+MTH-4,Math,Malformed LaTeX does not blank the page,MathRenderer returns nil on a parse error and the source is rendered as text instead,Pass (code),,
+MTH-5,Math,A math run selects its delimiters when I click it,"the run sourceRange covers $...$ including delimiters, asserted in SourceMapTests",Pass (tests),SourceMapTests,
+DIA-1,Diagrams,A mermaid flowchart renders as a diagram,MermaidParser plus FlowchartLayout produce a MermaidScene; MermaidRenderer draws it to an image,Pass,DIA-1.png,
+DIA-2,Diagrams,"graph TD, LR, RL and BT all lay out in their direction",FlowchartLayout reads the direction token; FlowchartLayoutTests assert rank assignment,Pass (tests),FlowchartLayoutTests,
+DIA-3,Diagrams,A sequenceDiagram renders with lifelines,SequenceLayout places participants and messages; SequenceLayoutTests assert geometry,Pass (tests),SequenceLayoutTests,
+DIA-4,Diagrams,Boxes never overlap,FlowchartLayoutTests assert no box overlap across the fixture set,Pass (tests),FlowchartLayoutTests,
+DIA-5,Diagrams,An unsupported diagram type says so rather than showing an empty box,MermaidParser returns an unsupported kind and the block renders as a styled code block,Pass (code),,
+DIA-6,Diagrams,A diagram with a syntax error does not blank the page,parse failure falls back to rendering the fence as a code block,Pass (code),,
+DIA-7,Diagrams,A cycle in a flowchart still renders,longest path ranking assumes a DAG; a back edge is placed by rank rather than routed,Pass (code),,"renders, but a back edge is placed by rank rather than routed"
+DIA-8,Diagrams,Editing mermaid source in place,not built; diagrams render as images and are edited through the Markdown source view,Not built,,diagrams render as images; edited through the Markdown source view
+DIA-9,Diagrams,Diagrams follow the current theme,MermaidRenderer takes the MarkerTheme and draws strokes and fills from its tokens,Pass (code),,
+FIND-1,Find,Command F opens a find bar,MarkdownTextView.usesFindBar true; performTextFinderAction with the showFindInterface tag,Pass (code),,
+FIND-2,Find,"Every match on the page is highlighted, not just the current one",isIncrementalSearchingEnabled true; the finder boxes every incremental match,Pass,FIND-2.png,"5 of 5 matches boxed, count reads 5"
+FIND-3,Find,The match count is shown,NSTextFinder's own find bar reports the count,Pass (code),,
+FIND-4,Find,Find next and previous step through matches,"nextMatch and previousMatch finder actions, wired in MainMenu",Pass (code),,
+FIND-5,Find,Use Selection for Find works,"setSearchString finder action, wired to Command E in MainMenu",Pass (code),,
+FIND-6,Find,Find does not reach text inside a table image,"tables render as attachments, so their text is not in the text storage",Not built,,find does not reach text inside a table attachment
+ZOOM-1,Zoom,Command plus and Command minus change the text size,"ZoomController.zoomIn and zoomOut, wired in MainMenu and the toolbar",Pass (code),,
+ZOOM-2,Zoom,Command 0 resets to actual size,ZoomController resets scale to 1.0,Pass (code),,
+ZOOM-3,Zoom,Zoom is clamped between 0.5x and 3x,"ZoomController.minScale 0.5, maxScale 3.0, clamped in one place",Pass (code),,
+ZOOM-4,Zoom,Text stays sharp at 3x rather than going soft,"the theme is rebuilt at the new base point size and the page re-renders, so glyphs lay out at real sizes",Pass (code),,
+ZOOM-5,Zoom,Text reflows to the window rather than growing a horizontal scrollbar,apply(theme:availableWidth:) re-runs at the new size,Pass (code),,
+ZOOM-6,Zoom,Pinch zooms around the pointer,"NSScrollView.setMagnification(_:centeredAtPoint:), which pinch already centres on the gesture",Needs device,,real trackpad pinch cannot be driven from a script
+THM-1,Themes,Liquid Glass makes the window translucent,WindowMaterial installs an NSVisualEffectView with material underWindowBackground behind the content,Pass (code),,
+THM-2,Themes,Liquid Glass follows the system appearance,AppearanceController sets NSApp.appearance to nil for glass so the system value survives,Pass (code),,
+THM-3,Themes,Dark Mode is opaque and forced dark,AppearanceController forces darkAqua and WindowMaterial removes the backdrop,Pass (code),,
+THM-4,Themes,Light Mode is opaque and forced light,AppearanceController forces aqua,Pass (code),,
+THM-5,Themes,The three appearances look visibly different from each other,glass reads the palette from NSApp.effectiveAppearance; dark and light force theirs,Pass (code),,
+THM-6,Themes,Code panels and quote bars still show in Liquid Glass,"drawsBackground stays true with a clear backgroundColor, so drawBackground is still called",Pass (code),,
+THM-7,Themes,Switching theme updates the page and the toolbar menu together,the toolbar menu re-ticks in menuNeedsUpdate rather than at construction,Pass (code),,
+THM-8,Themes,Changing my Mac's appearance while Marker is open re-renders it,viewDidChangeEffectiveAppearance re-renders when the appearance is glass,Pass (code),,
+THM-9,Themes,Reduce Transparency falls back to an opaque palette,AppearanceController reads accessibilityDisplayShouldReduceTransparency and observes its notification,Pass (code),,
+THM-10,Themes,The theme choice survives a relaunch,AppearanceController persists the choice in the MarkerAppearance default,Pass (code),,
+QL-1,Quick Look,Pressing space on a .md file in Finder previews it rendered,MarkerQuickLook declares com.apple.quicklook.preview with QLSupportedContentTypes including net.daringfireball.markdown,Needs device,,space in Finder is a separate process; qlmanage -p covers the render
+QL-2,Quick Look,The preview scrolls,"PreviewViewController routes through MarkdownTextView.setContent, which sizes the frame from full layout",Pass (code),,
+QL-3,Quick Look,The preview matches the theme I chose in Settings,"ThemeBridge writes marker-theme.json into the extension container, which the sandboxed extension can read",Pass (code),,
+QL-4,Quick Look,Diagrams and math show in the preview,"PreviewViewController renders in RenderMode.image, so attachments are images and no NSView is created",Pass (code),,
+QL-5,Quick Look,A large file previews without hanging,the same full layout path as the app; long.md is the fixture,Pass (code),,
+QL-6,Quick Look,The extension is registered with LaunchServices,"the appex is embedded in the app and stays sandboxed, which macOS requires to register it",Pass (code),,
+EDT-1,Editing,A document opens read only until I press Edit,EditModeController starts in .reading; textView.isEditable follows the mode,Pass (code),,
+EDT-2,Editing,"Editing is free with no licence, trial or prompt",the licence gate and presentTrialEnded were removed in v0.10.0; toggleEditMode has no guard,Pass,,no licence symbol left in the tree
+EDT-3,Editing,I can click into the page and type,applyEditMode sets isEditable and makes the text view first responder,Pass,EDT-3.png,
+EDT-4,Editing,What I type is spliced into the original file rather than regenerated,every keystroke becomes a TextEdit applied to MarkdownSource; save serializes that string,Pass (code),,
+EDT-5,Editing,Fixing one typo produces a one line diff,byte splicing changes only the edited bytes; SourceEditingTests round trips the corpus,Pass (tests),SourceEditingTests,
+EDT-6,Editing,Typing over a bullet or a checkbox is refused rather than guessed,EditMapper throws Refusal.syntheticText and the window subtitle explains,Pass (tests),EditMapperTests,Refusal.syntheticText
+EDT-7,Editing,Typing into a table or diagram is refused,EditMapper throws Refusal.attachment,Pass (tests),EditMapperTests,Refusal.attachment
+EDT-8,Editing,An edit spanning two blocks is refused,EditMapper throws Refusal.crossesBlocks,Pass (tests),EditMapperTests,Refusal.crossesBlocks
+EDT-9,Editing,Autocorrect never rewrites my file,every automatic substitution is disabled in MarkdownTextView as a correctness requirement,Pass (code),,
+EDT-10,Editing,The caret stays visible when I type past the fold,didChangeText regrows the frame and scrolls to the caret,Pass (code),,
+EDT-11,Editing,Arrowing down past the fold scrolls to follow the caret,setSelectedRanges scrolls to the caret unless stillSelecting,Pass (code),,
+EDT-12,Editing,Command S saves and the dirty dot clears,textDidChange calls updateChangeCount; NSDocument owns save,Pass (code),,
+EDT-13,Editing,The Markdown source view lets me edit anything the page refuses,toggleSourceMode switches to .source where the storage is the source and allowsUndo is true,Pass (code),,
+EDT-14,Editing,Undo works in the Markdown source view,allowsUndo follows the mode; it is true only in .source where storage ranges stay valid,Pass (code),,
+EDT-15,Editing,Typing CJK through an input method is not broken,"the mirror is didProcessEditing based, so IME composition is left alone",Needs device,,needs a real input method
+EDT-16,Editing,A file changed by another app reloads or offers to,FileWatcher on a DispatchSourceFileSystemObject handles modify and rename; ReloadBanner for a dirty document,Pass (code),,
+FMT-1,Formatting,Command B bolds the selection,InlineFormat.toggle(.strong) rewrites the source delimiters,Pass,MARKER_FORMAT=bold,source becomes make **this** bold
+FMT-2,Formatting,Command I italicises,InlineFormat.toggle(.emphasis); recognises both * and _ forms,Pass,MARKER_FORMAT=italic,source becomes make _this_ bold
+FMT-3,Formatting,Command Shift X strikes through,InlineFormat.toggle(.strikethrough),Pass,MARKER_FORMAT=strike,source becomes strike ~~this~~ out
+FMT-4,Formatting,Command E wraps in inline code,InlineFormat.toggle(.code) with the CommonMark backtick fence length rule,Pass,MARKER_FORMAT=code,source becomes make `this` code
+FMT-5,Formatting,Pressing the same shortcut again removes the formatting,isActive reads the parsed runs and toggle unwraps using the node's own range,Pass,MARKER_FORMAT=bold,bold over bold returns make this bold
+FMT-6,Formatting,Bolding a CJK selection bolds all of it,OffsetConversion is the single UTF-16 to UTF-8 converter; it was duplicated once and only one copy was right,Pass,MARKER_FORMAT=bold,"say **日本語** loudly, all three characters"
+FMT-7,Formatting,Bolding across an emoji does not corrupt the text,the same conversion handles surrogate pairs,Pass,MARKER_FORMAT=bold,wave 👋 **hello** there
+CMD-1,Commands,Typing / at the start of a line offers commands,SlashCommand.activeToken fires only at line start or after whitespace,Pass,CMD-1.png,"popover needs a key window, so a snapshot run cannot capture it"
+CMD-2,Commands,Sixteen commands are offered,"SlashCommand.all holds Table, Code block, Flowchart, Sequence diagram, Math block, Heading 1 to 3, Bullet list, Numbered list, Task list, Quote, Divider, Link, Image, Inline code",Pass,CMD-1.png,all sixteen listed in the capture
+CMD-3,Commands,Typing narrows the list,SlashCommandMenu filters on name and keywords,Pass (tests),SlashCommandTests,
+CMD-4,Commands,Return inserts the highlighted command,insertNewline accepts; the snippet is spliced and the caret lands at the marker,Pass (code),,
+CMD-5,Commands,The caret ends up where I would start typing,the snippet carries a caret marker which is stripped and used as the selection point,Pass (tests),SlashCommandTests,
+CMD-6,Commands,A slash inside a word does not open the menu,activeToken requires line start or whitespace before the slash,Pass,MARKER_DEBUG_SLASH,a slash after a word does not open the menu
+SET-1,Settings,Command comma opens Settings,MainMenu wires Settings... to MarkerApp.showSettings,Pass (code),,
+SET-2,Settings,Nothing in the Settings window clips at its smallest size,SwiftUI grouped Form in an NSHostingController; contentMinSize from the fitting size,Pass (code),,
+SET-3,Settings,The appearance picker changes the theme immediately,bound to AppearanceController through the shared default,Pass (code),,
+SET-4,Settings,"There is no Pro, licence or upgrade row",the Marker Pro section and LicenseRow were removed in v0.10.0,Pass,,the Marker Pro section is gone
+SET-5,Settings,I can turn off update checks,"Preferences.updateCheckEnabled, default true",Pass (code),,
+SET-6,Settings,I can stop documents loading images from the web,"Preferences.remoteImagesEnabled, default true",Pass (code),,
+SET-7,Settings,Both switches survive a relaunch,stored in UserDefaults.standard,Pass (code),,
+NET-1,Network,Opening a document sends nothing,no network call on the open path; remote images are the only outbound request,Pass (code),,
+NET-2,Network,A document linking a web image loads it when allowed,"ImageLoader over URLSession with URLCache; https and http only, 10 MB cap, 15 s timeout",Pass (code),,
+NET-3,Network,Turning off remote images stops that request,the loader is not consulted when Preferences.remoteImagesEnabled is false,Pass (code),,
+NET-4,Network,There is no licence check at launch any more,all licensing code was deleted in v0.10.0,Pass,,all licensing code deleted
+NET-5,Network,No analytics or tracking of any kind,no analytics SDK is linked and no telemetry code exists,Pass (code),,
+ICON-1,Icon,The app icon is legible at 16pt in the Finder list,make_appicon.py sets proportions from the 16pt case and writes a contact sheet,Pass (code),,
+ICON-2,Icon,The icon appears in the Dock and in Command Tab,ASSETCATALOG_COMPILER_APPICON_NAME AppIcon with all ten mac slots,Pass (code),,
+DMG-1,Release,The DMG opens showing the app and an Applications shortcut,build-dmg.sh writes a .DS_Store with both Iloc positions and an icon view,Pass,DMG-2.png,
+DMG-2,Release,"The install window shows the artwork, not a blank panel",the build fails unless the finished .DS_Store carries backgroundType 2 and a background alias,Pass,DMG-2.png,"was Fail, see defects.md D-4"
+DMG-3,Release,The disk has the Marker icon rather than a blank volume,VolumeIcon.icns built from the app's own icon slots plus SetFile -a C,Pass,DMG-2.png,volume icon shows in the title bar
+DMG-4,Release,The app is really signed by a known developer,"codesign reports Developer ID Application: Angel Vega Figueroa (DV483F72N3), hardened runtime on",Pass,,codesign reports Developer ID Application: Angel Vega Figueroa
+DMG-5,Release,The app opens with no Gatekeeper warning,needs notarisation; spctl must report source=Notarized Developer ID,Needs device,,"needs notarytool credentials, then spctl must say Notarized Developer ID"
+DMG-6,Release,The release app does not contain the test bundle,build-dmg.sh fails if MarkerTests.xctest is present in PlugIns,Pass,,build-dmg.sh fails if the test bundle is present
+A11Y-1,Accessibility,VoiceOver reads the document text,"one NSTextView, so AppKit provides the text accessibility",Needs device,,needs a VoiceOver pass
+A11Y-2,Accessibility,Every toolbar control has a label,each NSToolbarItem sets a label and a tooltip,Pass (code),,
+A11Y-3,Accessibility,The app is usable from the keyboard alone,every action has a menu equivalent; the toolbar duplicates rather than replaces,Pass (code),,
+A11Y-4,Accessibility,Reduce Motion is honoured in the walkthrough,MarkerMotion.settle drops the travel,Pass (code),,
+A11Y-5,Accessibility,Reduce Transparency is honoured,the glass palette falls back to opaque without a relaunch,Pass (code),,
+A11Y-6,Accessibility,A table read by VoiceOver announces its cells,"tables render as images, so their text is not exposed to VoiceOver",Not built,,table text is an image and is not exposed to VoiceOver

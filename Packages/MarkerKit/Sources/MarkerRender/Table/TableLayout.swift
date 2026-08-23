@@ -49,6 +49,30 @@ public struct TableLayout {
 
     // MARK: Measuring
 
+    /// The width of the widest whitespace delimited run in a cell.
+    ///
+    /// Measured on the attributed string so it carries the cell's own fonts: an
+    /// inline code span is monospaced and wider per character than the body face,
+    /// and that is exactly the case that was being squeezed.
+    private func widestWord(in cell: NSAttributedString) -> CGFloat {
+        let text = cell.string as NSString
+        var widest: CGFloat = 0
+        var start = 0
+        while start < text.length {
+            let remaining = NSRange(location: start, length: text.length - start)
+            var wordRange = text.rangeOfCharacter(from: .whitespacesAndNewlines, options: [], range: remaining)
+            if wordRange.location == NSNotFound {
+                wordRange = NSRange(location: text.length, length: 0)
+            }
+            let run = NSRange(location: start, length: wordRange.location - start)
+            if run.length > 0 {
+                widest = max(widest, cell.attributedSubstring(from: run).size().width)
+            }
+            start = wordRange.location + max(wordRange.length, 1)
+        }
+        return widest
+    }
+
     public func measure() -> Metrics {
         let columnCount = max(model.columns.count, 1)
 
@@ -60,18 +84,40 @@ public struct TableLayout {
             }
         }
 
+        // What each column cannot go below without breaking a word in half. A cell
+        // wraps at whitespace, so the narrowest a column can usefully be is its
+        // widest single word.
+        var minimum = [CGFloat](repeating: 0, count: columnCount)
+        for row in cells {
+            for (index, cell) in row.enumerated() where index < columnCount {
+                minimum[index] = max(minimum[index], widestWord(in: cell) + cellPadding * 2)
+            }
+        }
+
         let total = natural.reduce(0, +)
         var widths = natural
         if total > maxWidth, total > 0 {
-            // Shrink proportionally rather than truncating, and floor each column so
-            // a narrow one does not collapse to nothing while a wide one keeps most
-            // of the space.
-            let floorWidth = min(theme.bodyPointSize * 4, maxWidth / CGFloat(columnCount))
-            let scale = maxWidth / total
-            widths = natural.map { max($0 * scale, floorWidth) }
-            let scaled = widths.reduce(0, +)
-            if scaled > maxWidth {
-                widths = widths.map { $0 * (maxWidth / scaled) }
+            // Shrinking every column by the same factor is wrong when the columns
+            // are lopsided. A two column table holding a short identifier next to a
+            // paragraph gave the identifier a proportional share of a width it never
+            // asked for, and `MarkerRender` came out wrapped as "Marker" over
+            // "Render" while the paragraph column had room to spare.
+            //
+            // So: every column keeps its minimum, and only the space each column
+            // asked for ON TOP of that minimum is what gets shrunk.
+            let minimumTotal = minimum.reduce(0, +)
+            if minimumTotal >= maxWidth {
+                // Even the words alone do not fit. Nothing can be honoured here, so
+                // fall back to proportional and let the cells wrap mid-word.
+                let scale = maxWidth / minimumTotal
+                widths = minimum.map { $0 * scale }
+            } else {
+                let slack = maxWidth - minimumTotal
+                let wanted = zip(natural, minimum).map { max($0 - $1, 0) }
+                let wantedTotal = wanted.reduce(0, +)
+                widths = wantedTotal > 0
+                    ? zip(minimum, wanted).map { $0 + $1 * (slack / wantedTotal) }
+                    : minimum.map { $0 + slack / CGFloat(columnCount) }
             }
         }
 
