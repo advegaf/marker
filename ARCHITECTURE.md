@@ -182,6 +182,8 @@ Stated so that absent is a decision rather than an oversight.
 
 - Table cell editing and a Mermaid source editor. Tables and diagrams render as
   images and are edited through the Markdown source view.
+- Footnotes. The cmark-gfm footnote extension is not enabled, so `[^1]` is not in
+  the AST and renders as literal text.
 - Find does not reach text inside a live table attachment. Buying that back means a
   custom `NSTextFinderClient` over a flattened plain text projection. Searching the
   raw Markdown instead would be wrong, since `hello **world**` would not match a

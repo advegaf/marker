@@ -95,7 +95,7 @@ Tests are two commands, because XcodeGen cannot list a local package's test targ
 in an Xcode scheme and the package tests are the heaviest coverage in the repo:
 
 ```bash
-Scripts/test.sh          # 189 package tests, then 16 app tests
+Scripts/test.sh          # 199 package tests, then 16 app tests
 ```
 
 Quick Look needs the app registered with LaunchServices before the extension
