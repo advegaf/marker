@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.0.4
+
+- A narrow table column was squeezed until its words broke in half. `MarkerRender`
+  came out wrapped as "Marker" over "Render" while the paragraph column beside it
+  still had room. Every column now keeps the width of its widest whitespace
+  delimited run, and only the space asked for on top of that gets shrunk.
+- `QA/feature-stories.csv`, 142 rows, one per observable behaviour, each citing a
+  concrete code gate. `QA/defects.md` records five defects, four fixed.
+- Known: footnotes render as literal text. The cmark-gfm footnote extension is not
+  enabled.
+
+## 1.0.3
+
+- `Scripts/build-dmg.sh` builds the release DMG end to end, Developer ID signed,
+  with `--notarize` when credentials exist.
+- `Scripts/generate-dmg-background.swift` draws the install window art.
+- Fixed: the DMG shipped with no artwork and nothing reported a problem. Homebrew's
+  create-dmg sets the background with a path form that macOS 26 ignores, so the
+  `.DS_Store` recorded a colour instead. The build now fails unless the finished
+  `.DS_Store` carries a background alias.
+
 ## 1.0.1
 
 - `Scripts/frame-shot.swift` and `Scripts/make-docs-images.sh` regenerate every
