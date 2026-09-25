@@ -133,6 +133,14 @@ like one, then stands the result on a backdrop. Captures are always scoped to a
 single window by id. Full screen and region capture are not used anywhere in this
 repo, deliberately: both photograph whatever else happens to be open.
 
+## How I built it
+
+I built this with Claude Code and Codex working like a small team. One agent plans the work and
+writes a spec for each piece, subagents write the code from those specs, and the two tools review
+each other's changes. I approve the plan before any code gets written, I read every diff before
+it's committed, and nothing ships until the tests pass. Anything that touches security or user
+data I write or check line by line myself.
+
 ## License
 
 MIT. See `LICENSE`.
